@@ -1,0 +1,9 @@
+{
+  "name": "places-i-shot",
+  "private": true,
+  "scripts": {
+    "check:front": "node --check app.js",
+    "dev:api": "npm --prefix server run dev",
+    "start:api": "npm --prefix server run start"
+  }
+}
