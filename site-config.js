@@ -1,3 +1,3 @@
 window.PLACES_CONFIG = {
-  apiBaseUrl: "/api",
+  apiBaseUrl: "https://api.zeking.site/api",
 };
