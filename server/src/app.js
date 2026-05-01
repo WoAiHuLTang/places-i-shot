@@ -23,10 +23,12 @@ function slugifyText(value) {
 }
 
 async function ensureCity(connection, payload) {
+  const cityColumns = await getTableColumns("cities");
+  const hasAdcode = cityColumns.has("adcode");
   const normalizedId = Number(payload.cityId);
   if (normalizedId) {
     const [existingById] = await connection.query(
-      "SELECT id, slug, name, adcode FROM cities WHERE id = ? LIMIT 1",
+      `SELECT id, slug, name, ${hasAdcode ? "adcode" : "'' AS adcode"} FROM cities WHERE id = ? LIMIT 1`,
       [normalizedId]
     );
     if (existingById[0]) {
@@ -45,7 +47,7 @@ async function ensureCity(connection, payload) {
   }
 
   let existingCity = null;
-  if (adcode) {
+  if (adcode && hasAdcode) {
     const [existingByAdcode] = await connection.query(
       "SELECT id, slug, name, adcode FROM cities WHERE adcode = ? LIMIT 1",
       [adcode]
@@ -54,23 +56,27 @@ async function ensureCity(connection, payload) {
   }
   if (!existingCity) {
     const [existingByName] = await connection.query(
-      "SELECT id, slug, name, adcode FROM cities WHERE name = ? LIMIT 1",
+      `SELECT id, slug, name, ${hasAdcode ? "adcode" : "'' AS adcode"} FROM cities WHERE name = ? LIMIT 1`,
       [name]
     );
     existingCity = existingByName[0] || null;
   }
   if (existingCity) {
+    const updateSegments = ["province = ?", "coord_x = ?", "coord_y = ?"];
+    const updateValues = [province, coordX, coordY];
+    if (hasAdcode) {
+      updateSegments.splice(1, 0, "adcode = ?");
+      updateValues.splice(1, 0, adcode || existingCity.adcode || "");
+    }
+    updateValues.push(existingCity.id);
     await connection.query(
       `
         UPDATE cities
         SET
-          province = ?,
-          adcode = ?,
-          coord_x = ?,
-          coord_y = ?
+          ${updateSegments.join(",\n          ")}
         WHERE id = ?
       `,
-      [province, adcode || existingCity.adcode || "", coordX, coordY, existingCity.id]
+      updateValues
     );
     return {
       ...existingCity,
@@ -94,11 +100,31 @@ async function ensureCity(connection, payload) {
   const [result] = await connection.query(
     `
       INSERT INTO cities
-        (slug, name, name_en, province, adcode, coord_x, coord_y, description, gear)
+        (${[
+          "slug",
+          "name",
+          "name_en",
+          "province",
+          ...(hasAdcode ? ["adcode"] : []),
+          "coord_x",
+          "coord_y",
+          "description",
+          "gear",
+        ].join(", ")})
       VALUES
-        (?, ?, ?, ?, ?, ?, ?, '', '')
+        (${[
+          "?",
+          "?",
+          "?",
+          "?",
+          ...(hasAdcode ? ["?"] : []),
+          "?",
+          "?",
+          "''",
+          "''",
+        ].join(", ")})
     `,
-    [slug, name, payload.cityNameEn || "", province, adcode, coordX, coordY]
+    [slug, name, payload.cityNameEn || "", province, ...(hasAdcode ? [adcode] : []), coordX, coordY]
   );
 
   return {
@@ -177,6 +203,7 @@ app.post("/api/admin/login", async (request, response, next) => {
 
 app.get("/api/admin/cities", requireAdmin, async (_request, response, next) => {
   try {
+    const cityColumns = await getTableColumns("cities");
     const [rows] = await pool.query(
       `
         SELECT
@@ -185,7 +212,7 @@ app.get("/api/admin/cities", requireAdmin, async (_request, response, next) => {
           c.name,
           c.name_en AS nameEn,
           c.province,
-          c.adcode,
+          ${cityColumns.has("adcode") ? "c.adcode" : "'' AS adcode"},
           COUNT(p.id) AS photoCount
         FROM cities c
         LEFT JOIN photos p ON p.city_id = c.id AND p.is_published = 1

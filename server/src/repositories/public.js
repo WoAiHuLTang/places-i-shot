@@ -53,6 +53,7 @@ async function getPublishedPhotos(cityId) {
 }
 
 export async function listPublicCities() {
+  const cityColumns = await getTableColumns("cities");
   const [cities] = await pool.query(
     `
       SELECT
@@ -61,7 +62,7 @@ export async function listPublicCities() {
         name,
         name_en AS nameEn,
         province,
-        adcode,
+        ${cityColumns.has("adcode") ? "adcode" : "'' AS adcode"},
         coord_x AS coordX,
         coord_y AS coordY,
         description,

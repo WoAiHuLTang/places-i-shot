@@ -3395,6 +3395,103 @@ function bindEvents() {
   });
 }
 
+function renderTopNav() {
+  const current = state.route.name === "city" ? "map" : state.route.name;
+  return `
+    <header class="topbar">
+      <a class="brand" href="#/map">
+        <span class="brand-eyebrow">Places I Shot</span>
+        <span class="brand-title">Personal Photo Atlas</span>
+      </a>
+      <nav class="nav">
+        <a class="nav-link ${current === "map" ? "is-active" : ""}" href="#/map">Atlas</a>
+        <a class="nav-link ${current === "admin" ? "is-active" : ""}" href="#/admin">Admin</a>
+      </nav>
+    </header>
+  `;
+}
+
+function renderMapPage() {
+  const highlightedCities = state.cities.filter((city) => city.photoCount > 0);
+  const photoCount = state.cities.reduce((sum, city) => sum + city.photoCount, 0);
+  const placeCount = unique(state.cities.flatMap((city) => city.collections.map((item) => item.label))).length;
+
+  return `
+    <section class="page map-page">
+      ${renderBanner()}
+      <div class="hero">
+        <div class="hero-copy is-editorial is-camera-layout">
+          <div class="camera-object" aria-hidden="true">
+            <div class="camera-object-plate"></div>
+            <div class="camera-object-body">
+              <span class="camera-object-accent"></span>
+              <div class="camera-object-lens">
+                <span class="camera-lens-ring is-outer"></span>
+                <span class="camera-lens-ring is-middle"></span>
+                <span class="camera-lens-ring is-inner"></span>
+                <span class="camera-lens-core"></span>
+                <span class="camera-lens-glint"></span>
+              </div>
+              <span class="camera-object-side is-left"></span>
+              <span class="camera-object-side is-right"></span>
+            </div>
+          </div>
+          <div class="hero-copy-block">
+            <span class="eyebrow">Places I Shot</span>
+            <h1>个人摄影档案</h1>
+            <p class="hero-intro">把拍过的城市，慢慢归档成一张地图。</p>
+            <div class="hero-metrics is-inline">
+              <span class="hero-metric-chip"><strong>${highlightedCities.length}</strong><span>城市</span></span>
+              <span class="hero-metric-chip"><strong>${photoCount}</strong><span>照片</span></span>
+              <span class="hero-metric-chip"><strong>${placeCount}</strong><span>地点</span></span>
+            </div>
+            <p class="hero-note">Personal Photo Atlas</p>
+          </div>
+        </div>
+        <article class="map-card national-card">
+          <div class="map-stage large-stage" id="china-map">
+            <div class="map-stage-wash"></div>
+            <div class="map-stage-caption">
+              <span>China</span>
+              <span>Lit by photographs</span>
+            </div>
+            ${!CONFIG.amapKey ? renderMapUnavailable("请先在 site-config.js 中填写高德地图 Key 与安全密钥。") : ""}
+          </div>
+        </article>
+      </div>
+      <section class="city-strip compact">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Cities</span>
+            <h2>被点亮的城市</h2>
+          </div>
+        </div>
+        <div class="city-card-grid">
+          ${highlightedCities
+            .map(
+              (city) => `
+                <button class="city-card" type="button" data-city-open="${city.slug}">
+                  <div class="city-card-cover" style="background-image:url('${city.cover}')"></div>
+                  <div class="city-card-body">
+                    <div class="city-card-top">
+                      <strong>${escapeHtml(city.name)}</strong>
+                      <span>${escapeHtml(city.nameEn || city.province)}</span>
+                    </div>
+                    <div class="city-card-meta">
+                      <span>${city.photoCount} 张</span>
+                      <span>${city.collections.length} 组地点</span>
+                    </div>
+                  </div>
+                </button>
+              `
+            )
+            .join("")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
 function init() {
   renderShell();
   bindEvents();
