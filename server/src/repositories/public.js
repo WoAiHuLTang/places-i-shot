@@ -1,4 +1,5 @@
 import { pool } from "../db.js";
+import { getTableColumns } from "../schema.js";
 
 async function getPhotoTags(photoId) {
   const [rows] = await pool.query(
@@ -9,6 +10,14 @@ async function getPhotoTags(photoId) {
 }
 
 async function getPublishedPhotos(cityId) {
+  const photoColumns = await getTableColumns("photos");
+  const optionalPhotoFields = {
+    districtCode: photoColumns.has("district_code") ? "district_code AS districtCode" : "NULL AS districtCode",
+    districtName: photoColumns.has("district_name") ? "district_name AS districtName" : "NULL AS districtName",
+    streetName: photoColumns.has("street_name") ? "street_name AS streetName" : "NULL AS streetName",
+    longitude: photoColumns.has("longitude") ? "longitude" : "NULL AS longitude",
+    latitude: photoColumns.has("latitude") ? "latitude" : "NULL AS latitude",
+  };
   const [rows] = await pool.query(
     `
       SELECT
@@ -17,11 +26,11 @@ async function getPublishedPhotos(cityId) {
         shot_at AS shotAt,
         camera,
         location_name AS location,
-        district_code AS districtCode,
-        district_name AS districtName,
-        street_name AS streetName,
-        longitude,
-        latitude,
+        ${optionalPhotoFields.districtCode},
+        ${optionalPhotoFields.districtName},
+        ${optionalPhotoFields.streetName},
+        ${optionalPhotoFields.longitude},
+        ${optionalPhotoFields.latitude},
         description,
         image_url AS imageUrl,
         is_cover AS isCover

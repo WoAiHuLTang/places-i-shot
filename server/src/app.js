@@ -9,9 +9,105 @@ import { pool } from "./db.js";
 import { requireAdmin, signAdminToken, verifyPassword } from "./auth.js";
 import { uploadBufferToCos } from "./cos.js";
 import { listPublicCities } from "./repositories/public.js";
+import { getTableColumns } from "./schema.js";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
+
+function slugifyText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+async function ensureCity(connection, payload) {
+  const normalizedId = Number(payload.cityId);
+  if (normalizedId) {
+    const [existingById] = await connection.query(
+      "SELECT id, slug, name, adcode FROM cities WHERE id = ? LIMIT 1",
+      [normalizedId]
+    );
+    if (existingById[0]) {
+      return existingById[0];
+    }
+  }
+
+  const name = String(payload.cityName || "").trim();
+  const province = String(payload.province || name).trim() || "中国";
+  const adcode = String(payload.cityAdcode || "").trim();
+  const coordX = Number(payload.cityLongitude);
+  const coordY = Number(payload.cityLatitude);
+
+  if (!name || Number.isNaN(coordX) || Number.isNaN(coordY)) {
+    throw new Error("A publishable city context is required");
+  }
+
+  let existingCity = null;
+  if (adcode) {
+    const [existingByAdcode] = await connection.query(
+      "SELECT id, slug, name, adcode FROM cities WHERE adcode = ? LIMIT 1",
+      [adcode]
+    );
+    existingCity = existingByAdcode[0] || null;
+  }
+  if (!existingCity) {
+    const [existingByName] = await connection.query(
+      "SELECT id, slug, name, adcode FROM cities WHERE name = ? LIMIT 1",
+      [name]
+    );
+    existingCity = existingByName[0] || null;
+  }
+  if (existingCity) {
+    await connection.query(
+      `
+        UPDATE cities
+        SET
+          province = ?,
+          adcode = ?,
+          coord_x = ?,
+          coord_y = ?
+        WHERE id = ?
+      `,
+      [province, adcode || existingCity.adcode || "", coordX, coordY, existingCity.id]
+    );
+    return {
+      ...existingCity,
+      name,
+      adcode: adcode || existingCity.adcode || "",
+    };
+  }
+
+  const slugBase = slugifyText(payload.cityNameEn) || (adcode ? `city-${adcode}` : `city-${randomUUID().slice(0, 8)}`);
+  let slug = slugBase;
+  let suffix = 2;
+  while (true) {
+    const [rows] = await connection.query("SELECT id FROM cities WHERE slug = ? LIMIT 1", [slug]);
+    if (!rows[0]) {
+      break;
+    }
+    slug = `${slugBase}-${suffix}`;
+    suffix += 1;
+  }
+
+  const [result] = await connection.query(
+    `
+      INSERT INTO cities
+        (slug, name, name_en, province, adcode, coord_x, coord_y, description, gear)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, '', '')
+    `,
+    [slug, name, payload.cityNameEn || "", province, adcode, coordX, coordY]
+  );
+
+  return {
+    id: result.insertId,
+    slug,
+    name,
+    adcode,
+  };
+}
 
 app.use(
   cors({
@@ -107,16 +203,13 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
   const connection = await pool.getConnection();
 
   try {
+    const photoColumns = await getTableColumns("photos");
     if (!request.files?.length) {
       response.status(400).json({ error: "At least one photo is required" });
       return;
     }
 
-    const cityId = Number(request.body.cityId);
-    if (!cityId) {
-      response.status(400).json({ error: "cityId is required" });
-      return;
-    }
+    const cityId = Number(request.body.cityId) || null;
 
     const title = request.body.title || "Untitled Frame";
     const shotAt = request.body.shotAt || new Date().toISOString().slice(0, 10);
@@ -129,6 +222,12 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
     const streetName = request.body.streetName || "";
     const longitude = request.body.longitude ? Number(request.body.longitude) : null;
     const latitude = request.body.latitude ? Number(request.body.latitude) : null;
+    const cityName = String(request.body.cityName || "").trim();
+    const cityNameEn = String(request.body.cityNameEn || "").trim();
+    const province = String(request.body.province || "").trim();
+    const cityAdcode = String(request.body.cityAdcode || "").trim();
+    const cityLongitude = request.body.cityLongitude ? Number(request.body.cityLongitude) : longitude;
+    const cityLatitude = request.body.cityLatitude ? Number(request.body.cityLatitude) : latitude;
     const description = request.body.description || "";
     const tags = String(request.body.tags || "")
       .split(",")
@@ -144,11 +243,15 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
 
     await connection.beginTransaction();
 
-    const [cities] = await connection.query(
-      "SELECT id, slug FROM cities WHERE id = ? LIMIT 1",
-      [cityId]
-    );
-    const city = cities[0];
+    const city = await ensureCity(connection, {
+      cityId,
+      cityName,
+      cityNameEn,
+      province,
+      cityAdcode,
+      cityLongitude,
+      cityLatitude,
+    });
     if (!city) {
       response.status(404).json({ error: "City not found" });
       return;
@@ -166,30 +269,48 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
         key: objectKey,
       });
 
+      const insertColumns = ["id", "city_id", "title", "shot_at", "camera", "location_name"];
+      const insertValues = [
+        photoId,
+        city.id,
+        request.files.length > 1 ? `${title} ${index + 1}` : title,
+        shotAt,
+        camera,
+        location,
+      ];
+
+      if (photoColumns.has("district_code")) {
+        insertColumns.push("district_code");
+        insertValues.push(districtCode);
+      }
+      if (photoColumns.has("district_name")) {
+        insertColumns.push("district_name");
+        insertValues.push(districtName);
+      }
+      if (photoColumns.has("street_name")) {
+        insertColumns.push("street_name");
+        insertValues.push(streetName);
+      }
+      if (photoColumns.has("longitude")) {
+        insertColumns.push("longitude");
+        insertValues.push(longitude);
+      }
+      if (photoColumns.has("latitude")) {
+        insertColumns.push("latitude");
+        insertValues.push(latitude);
+      }
+
+      insertColumns.push("description", "image_url", "is_cover", "is_published");
+      insertValues.push(description, imageUrl, isCover && index === 0 ? 1 : 0, published ? 1 : 0);
+
       await connection.query(
         `
           INSERT INTO photos
-            (id, city_id, title, shot_at, camera, location_name, district_code, district_name, street_name, longitude, latitude, description, image_url, is_cover, is_published)
+            (${insertColumns.join(", ")})
           VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (${insertColumns.map(() => "?").join(", ")})
         `,
-        [
-          photoId,
-          cityId,
-          request.files.length > 1 ? `${title} ${index + 1}` : title,
-          shotAt,
-          camera,
-          location,
-          districtCode,
-          districtName,
-          streetName,
-          longitude,
-          latitude,
-          description,
-          imageUrl,
-          isCover && index === 0 ? 1 : 0,
-          published ? 1 : 0,
-        ]
+        insertValues
       );
 
       for (const tag of tags) {
@@ -203,7 +324,14 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
     }
 
     await connection.commit();
-    response.status(201).json({ photoIds: insertedIds });
+    response.status(201).json({
+      photoIds: insertedIds,
+      city: {
+        id: city.id,
+        slug: city.slug,
+        name: city.name,
+      },
+    });
   } catch (error) {
     await connection.rollback();
     next(error);

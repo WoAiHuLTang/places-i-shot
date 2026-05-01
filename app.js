@@ -212,6 +212,12 @@ const state = {
   },
   admin: {
     cityId: null,
+    cityName: "",
+    cityNameEn: "",
+    province: "",
+    cityAdcode: "",
+    cityLongitude: "",
+    cityLatitude: "",
     title: "",
     shotAt: "",
     camera: "",
@@ -2617,6 +2623,776 @@ function renderPhotoGrid(collection, city) {
         .join("")}
     </div>
   `;
+}
+
+function normalizeAdminText(value) {
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).join("");
+  }
+  return String(value || "").trim();
+}
+
+function simplifyCityName(value) {
+  return normalizeAdminText(value).replace(/(市|地区|盟|自治州)$/u, "") || normalizeAdminText(value);
+}
+
+function deriveCityAdcodeFromDistrict(value) {
+  const code = String(value || "").trim();
+  if (!/^\d{6}$/.test(code)) {
+    return "";
+  }
+  return `${code.slice(0, 4)}00`;
+}
+
+function getAdminResolvedCity() {
+  const hasExplicitCityContext = Boolean(state.admin.cityName || state.admin.selectedPoiName || state.admin.longitude);
+
+  if (state.admin.cityId && hasExplicitCityContext) {
+    const byId = state.cities.find((city) => city.id === Number(state.admin.cityId));
+    if (byId) {
+      return byId;
+    }
+  }
+
+  const targetName = simplifyCityName(state.admin.cityName);
+  if (!targetName) {
+    return null;
+  }
+
+  return (
+    state.cities.find((city) => {
+      const cityName = simplifyCityName(city.name);
+      return cityName === targetName || city.adcode === state.admin.cityAdcode;
+    }) || null
+  );
+}
+
+function getAdminContextCity() {
+  const existing = getAdminResolvedCity();
+  if (existing) {
+    return existing;
+  }
+
+  if (!state.admin.cityName || !state.admin.cityLongitude || !state.admin.cityLatitude) {
+    return null;
+  }
+
+  return {
+    id: null,
+    slug: "",
+    name: state.admin.cityName,
+    nameEn: state.admin.cityNameEn || "",
+    province: state.admin.province || state.admin.cityName,
+    adcode: state.admin.cityAdcode || "",
+    center: {
+      lng: Number(state.admin.cityLongitude),
+      lat: Number(state.admin.cityLatitude),
+    },
+    collections: [],
+    photos: [],
+    photoCount: 0,
+  };
+}
+
+function applyAdminCityContext(item) {
+  const cityName = simplifyCityName(item.cityName || item.province || item.district || "");
+  const province = normalizeAdminText(item.province) || cityName;
+  const cityAdcode = item.cityAdcode || deriveCityAdcodeFromDistrict(item.adcode);
+  const existing = state.cities.find((city) => {
+    const currentName = simplifyCityName(city.name);
+    return currentName === cityName || (cityAdcode && city.adcode === cityAdcode);
+  });
+
+  state.admin.cityId = existing?.id || null;
+  state.admin.cityName = existing?.name || cityName;
+  state.admin.cityNameEn = existing?.nameEn || "";
+  state.admin.province = existing?.province || province;
+  state.admin.cityAdcode = existing?.adcode || cityAdcode;
+  state.admin.cityLongitude = String(item.location?.lng ?? "");
+  state.admin.cityLatitude = String(item.location?.lat ?? "");
+}
+
+function renderSearchResults() {
+  if (!state.admin.searchResults.length) {
+    return "";
+  }
+
+  return `
+    <div class="search-results">
+      ${state.admin.searchResults
+        .map(
+          (item, index) => `
+            <button class="search-result" type="button" data-search-pick="${index}">
+              <strong>${escapeHtml(item.name)}</strong>
+              <span>${escapeHtml(
+                [item.cityName, item.district || item.address].filter(Boolean).join(" · ")
+              )}</span>
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderMapPage() {
+  const highlightedCities = state.cities.filter((city) => city.photoCount > 0);
+  const photoCount = state.cities.reduce((sum, city) => sum + city.photoCount, 0);
+  const placeCount = unique(state.cities.flatMap((city) => city.collections.map((item) => item.label))).length;
+
+  return `
+    <section class="page map-page">
+      ${renderBanner()}
+      <div class="hero">
+        <div class="hero-copy is-editorial">
+          <span class="eyebrow">Places I Shot</span>
+          <h1>让作品先开口。</h1>
+          <p class="hero-intro">一张地图，只负责把每次取景轻轻点亮。</p>
+          <div class="hero-metrics">
+            <article class="hero-metric">
+              <strong>${highlightedCities.length}</strong>
+              <span>已点亮城市</span>
+            </article>
+            <article class="hero-metric">
+              <strong>${photoCount}</strong>
+              <span>照片归档</span>
+            </article>
+            <article class="hero-metric">
+              <strong>${placeCount}</strong>
+              <span>地点集合</span>
+            </article>
+          </div>
+          <p class="hero-note">Photographs first. Geography second.</p>
+        </div>
+        <article class="map-card national-card">
+          <div class="map-stage large-stage" id="china-map">
+            <div class="map-stage-wash"></div>
+            <div class="map-stage-caption">
+              <span>China</span>
+              <span>Lit by photographs</span>
+            </div>
+            ${!CONFIG.amapKey ? renderMapUnavailable("请先在 site-config.js 中填入高德地图 Key 与安全密钥。") : ""}
+          </div>
+        </article>
+      </div>
+      <section class="city-strip compact">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Cities</span>
+            <h2>已点亮的城市</h2>
+          </div>
+        </div>
+        <div class="city-card-grid">
+          ${highlightedCities
+            .map(
+              (city) => `
+                <button class="city-card" type="button" data-city-open="${city.slug}">
+                  <div class="city-card-cover" style="background-image:url('${city.cover}')"></div>
+                  <div class="city-card-body">
+                    <div class="city-card-top">
+                      <strong>${escapeHtml(city.name)}</strong>
+                      <span>${escapeHtml(city.nameEn || city.province)}</span>
+                    </div>
+                    <div class="city-card-meta">
+                      <span>${city.photoCount} 张</span>
+                      <span>${city.collections.length} 组地点</span>
+                    </div>
+                  </div>
+                </button>
+              `
+            )
+            .join("")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderAdminPage() {
+  if (!state.auth.token) {
+    return renderLoginPanel();
+  }
+
+  const city = getAdminResolvedCity();
+  const displayCityName = state.admin.cityName || city?.name || "未锁定城市";
+  const displayProvince = state.admin.province || city?.province || "选中具体地点后自动识别";
+  const canPublish = Boolean(
+    state.admin.files.length &&
+      state.admin.longitude &&
+      state.admin.latitude &&
+      state.admin.selectedPoiName &&
+      state.admin.locationSource === "poi" &&
+      displayCityName &&
+      displayCityName !== "未锁定城市"
+  );
+
+  return `
+    <section class="page admin-page">
+      <div class="page-head compact">
+        <div class="page-head-copy">
+          <span class="eyebrow">Upload</span>
+          <h1>地点上传</h1>
+          <p>先选一个具体地点，再把这一组照片交给它。</p>
+        </div>
+        <button class="ghost-button" type="button" data-logout>退出</button>
+      </div>
+      <div class="admin-layout">
+        <article class="form-panel">
+          ${state.admin.status ? `<div class="status-banner is-${escapeHtml(state.admin.statusKind || "neutral")}">${escapeHtml(state.admin.status)}</div>` : ""}
+          <div class="admin-city-card">
+            <span class="eyebrow">City</span>
+            <strong>${escapeHtml(displayCityName)}</strong>
+            <span>${escapeHtml(city ? "已有城市档案" : displayProvince)}</span>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span>标题</span>
+              <input class="input" type="text" data-admin-field="title" value="${escapeHtml(state.admin.title)}" placeholder="例如：雨后的桥边" />
+            </label>
+            <label class="field">
+              <span>日期</span>
+              <input class="input" type="date" data-admin-field="shotAt" value="${escapeHtml(state.admin.shotAt)}" />
+            </label>
+            <label class="field">
+              <span>器材</span>
+              <input class="input" type="text" data-admin-field="camera" value="${escapeHtml(state.admin.camera)}" placeholder="例如：Leica Q3" />
+            </label>
+            <label class="field field-full">
+              <span>搜索具体地点</span>
+              <div class="search-line">
+                <input
+                  class="input"
+                  type="text"
+                  data-admin-field="searchKeyword"
+                  value="${escapeHtml(state.admin.searchKeyword)}"
+                  placeholder="例如：西泠桥 / 外滩 / 永庆坊"
+                />
+                <button class="ghost-button" type="button" data-admin-search>搜索</button>
+              </div>
+              ${renderSearchResults()}
+              <span class="mini-note">发布只接受从搜索结果中选中的具体地点 POI。</span>
+            </label>
+            <div class="field field-full">
+              <span>已锁定地点</span>
+              <div class="location-pills">
+                <span class="info-pill">${escapeHtml(displayCityName)}</span>
+                <span class="info-pill">${escapeHtml(state.admin.selectedPoiName || "具体地点 POI")}</span>
+                <span class="info-pill">${escapeHtml(state.admin.districtName || "区 / 县")}</span>
+                <span class="info-pill">${escapeHtml(state.admin.streetName || "街道")}</span>
+              </div>
+              <input
+                class="input subtle-input"
+                type="text"
+                value="${escapeHtml(state.admin.locationLabel)}"
+                readonly
+                placeholder="选中搜索结果后，这里会自动带出地点信息"
+              />
+            </div>
+            <label class="field field-full">
+              <span>标签</span>
+              <input class="input" type="text" data-admin-field="tags" value="${escapeHtml(state.admin.tags)}" placeholder="街拍, 建筑, 夜景" />
+            </label>
+            <label class="field field-full">
+              <span>描述</span>
+              <textarea class="input textarea" data-admin-field="description" placeholder="少量描述即可。">${escapeHtml(
+                state.admin.description
+              )}</textarea>
+            </label>
+            <label class="field field-full">
+              <span>照片</span>
+              <input class="input file-input" type="file" accept="image/*" multiple data-admin-files />
+            </label>
+          </div>
+          ${
+            state.admin.previews.length
+              ? `
+                <div class="preview-grid">
+                  ${state.admin.previews
+                    .map(
+                      (preview) => `
+                        <div class="preview-card">
+                          <div class="preview-image" style="background-image:url('${preview.src}')"></div>
+                          <span>${escapeHtml(preview.name)}</span>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              `
+              : ""
+          }
+          <div class="actions">
+            <button class="primary-button" type="button" data-admin-publish ${canPublish ? "" : "disabled"}>
+              发布到 ${escapeHtml(displayCityName)}
+            </button>
+          </div>
+        </article>
+        <article class="map-card admin-map-card">
+          <div class="admin-map-head">
+            <div>
+              <span class="eyebrow">Picker</span>
+              <h2>${escapeHtml(displayCityName === "未锁定城市" ? "全国地点" : displayCityName)}</h2>
+            </div>
+            <span class="mini-note">地图点选只用于辅助查看位置，最终仍以搜索选中的 POI 为准。</span>
+          </div>
+          <div class="map-stage admin-stage" id="admin-map">
+            ${!CONFIG.amapKey ? renderMapUnavailable("需要高德地图 Key 才能在后台精确选点。") : ""}
+          </div>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+async function initAdminMap() {
+  const container = document.getElementById("admin-map");
+  if (!container || !CONFIG.amapKey) {
+    return;
+  }
+
+  const AMap = await loadAMap();
+  destroyMap("admin");
+  clearAdminOverlays();
+
+  const city = getAdminContextCity();
+  const center = city ? [city.center.lng, city.center.lat] : [104.2, 35.8];
+  const zoom = city ? 11.2 : 4.6;
+  const map = new AMap.Map(container, createMapOptions(center, zoom));
+  applyNativeMapFeatures(map);
+  mapStore.admin = map;
+
+  if (city) {
+    const districts = await fetchCityDistricts(city);
+    const polygons = [];
+    for (const district of districts) {
+      for (const path of district.boundaries) {
+        const polygon = new AMap.Polygon({
+          path,
+          strokeColor: "#d7cfc3",
+          strokeWeight: 1.4,
+          fillColor: "#fbf8f2",
+          fillOpacity: 0.24,
+        });
+        polygon.setMap(map);
+        mapStore.adminOverlays.push(polygon);
+        polygons.push(polygon);
+      }
+    }
+    if (polygons.length) {
+      map.setFitView(polygons, false, [52, 52, 52, 52], 13);
+    }
+  }
+
+  map.on("click", async (event) => {
+    const lng = Number(event.lnglat.getLng().toFixed(6));
+    const lat = Number(event.lnglat.getLat().toFixed(6));
+    await setAdminLocationFromLngLat(getAdminContextCity(), { lng, lat }, "", "map");
+  });
+
+  if (state.admin.longitude && state.admin.latitude) {
+    placeAdminMarker(AMap, {
+      lng: Number(state.admin.longitude),
+      lat: Number(state.admin.latitude),
+    });
+    map.panTo([Number(state.admin.longitude), Number(state.admin.latitude)]);
+    if (state.admin.selectedPoiName) {
+      map.setZoom(14.5);
+    }
+  }
+}
+
+async function reverseGeocode(city, point) {
+  const AMap = await loadAMap();
+  return new Promise((resolve, reject) => {
+    const geocoder = new AMap.Geocoder({
+      city: city?.adcode || city?.name || "",
+      radius: 800,
+      extensions: "all",
+    });
+
+    geocoder.getAddress([point.lng, point.lat], (status, result) => {
+      if (status !== "complete" || !result?.regeocode) {
+        reject(new Error("逆地理编码失败"));
+        return;
+      }
+
+      const addressComponent = result.regeocode.addressComponent || {};
+      const streetNumber = addressComponent.streetNumber || {};
+      const cityName = simplifyCityName(addressComponent.city || city?.name || addressComponent.province || "");
+      const province = normalizeAdminText(addressComponent.province || city?.province || cityName);
+      const streetName =
+        [addressComponent.township, streetNumber.street, streetNumber.number].filter(Boolean).join("") ||
+        streetNumber.street ||
+        "";
+
+      resolve({
+        cityName,
+        province,
+        cityAdcode: city?.adcode || deriveCityAdcodeFromDistrict(addressComponent.adcode || ""),
+        districtCode: addressComponent.adcode || "",
+        districtName: addressComponent.district || addressComponent.township || "",
+        streetName,
+        locationLabel:
+          result.regeocode.formattedAddress ||
+          [cityName, addressComponent.district, streetName].filter(Boolean).join(" "),
+        longitude: point.lng.toFixed(6),
+        latitude: point.lat.toFixed(6),
+      });
+    });
+  });
+}
+
+async function handleAdminSearch() {
+  if (!state.admin.searchKeyword.trim()) {
+    return;
+  }
+
+  try {
+    const AMap = await loadAMap();
+    const placeSearch = new AMap.PlaceSearch({
+      citylimit: false,
+      pageSize: 8,
+      pageIndex: 1,
+      extensions: "all",
+    });
+
+    const results = await new Promise((resolve, reject) => {
+      placeSearch.search(state.admin.searchKeyword.trim(), (status, result) => {
+        if (status !== "complete") {
+          reject(new Error("地点搜索失败"));
+          return;
+        }
+        resolve(result?.poiList?.pois || []);
+      });
+    });
+
+    state.admin.searchResults = results
+      .filter((poi) => poi.location)
+      .map((poi) => {
+        const province = normalizeAdminText(poi.pname);
+        const cityName = simplifyCityName(poi.cityname || province || poi.adname || "");
+        return {
+          name: normalizeAdminText(poi.name),
+          address: normalizeAdminText(poi.address),
+          district: normalizeAdminText(poi.adname || poi.district),
+          province,
+          cityName,
+          cityAdcode: deriveCityAdcodeFromDistrict(poi.adcode),
+          adcode: normalizeAdminText(poi.adcode),
+          location: {
+            lng: Number(poi.location.lng),
+            lat: Number(poi.location.lat),
+          },
+        };
+      });
+
+    state.admin.statusKind = "neutral";
+    state.admin.status = state.admin.searchResults.length ? "请选择一个地点结果。" : "没有搜到地点。";
+    renderApp();
+  } catch (error) {
+    state.admin.statusKind = "error";
+    state.admin.status = error.message || "搜索失败";
+    renderApp();
+  }
+}
+
+async function setAdminLocationFromLngLat(city, point, preferredLabel = "", source = "map") {
+  try {
+    const info = await reverseGeocode(city, point);
+    if (!state.admin.cityName) {
+      state.admin.cityName = info.cityName;
+      state.admin.province = info.province;
+      state.admin.cityAdcode = info.cityAdcode;
+      state.admin.cityLongitude = info.longitude;
+      state.admin.cityLatitude = info.latitude;
+    }
+    state.admin.districtCode = info.districtCode;
+    state.admin.districtName = info.districtName;
+    state.admin.streetName = info.streetName;
+    state.admin.locationLabel = preferredLabel || info.locationLabel;
+    state.admin.longitude = info.longitude;
+    state.admin.latitude = info.latitude;
+    state.admin.selectedPoiName = source === "poi" ? preferredLabel : "";
+    state.admin.locationSource = source;
+    state.admin.statusKind = "neutral";
+    state.admin.status =
+      source === "poi"
+        ? `已锁定地点：${preferredLabel}`
+        : "当前位置只作为地图辅助定位，请从搜索结果中选中一个具体地点再发布。";
+
+    const AMap = await loadAMap();
+    placeAdminMarker(AMap, point);
+    if (mapStore.admin) {
+      mapStore.admin.panTo([point.lng, point.lat]);
+      mapStore.admin.setZoom(source === "poi" ? 14.5 : 13.8);
+    }
+    renderApp();
+  } catch (error) {
+    state.admin.statusKind = "error";
+    state.admin.status = error.message || "无法解析当前位置";
+    renderApp();
+  }
+}
+
+async function handlePublish() {
+  const city = getAdminResolvedCity();
+  const publishCityName = state.admin.cityName || city?.name || "";
+  if (!publishCityName) {
+    state.admin.statusKind = "error";
+    state.admin.status = "请先从搜索结果里选中一个具体地点。";
+    renderApp();
+    return;
+  }
+  if (!state.admin.files.length) {
+    state.admin.statusKind = "error";
+    state.admin.status = "请至少选择一张照片。";
+    renderApp();
+    return;
+  }
+  if (!state.admin.longitude || !state.admin.latitude || !state.admin.districtName) {
+    state.admin.statusKind = "error";
+    state.admin.status = "请先确认地图位置。";
+    renderApp();
+    return;
+  }
+  if (state.admin.locationSource !== "poi" || !state.admin.selectedPoiName) {
+    state.admin.statusKind = "error";
+    state.admin.status = "请先从搜索结果中选中一个具体地点 POI，再发布照片。";
+    renderApp();
+    return;
+  }
+
+  const formData = new FormData();
+  if (city?.id) {
+    formData.append("cityId", String(city.id));
+  }
+  formData.append("cityName", publishCityName);
+  formData.append("cityNameEn", state.admin.cityNameEn || city?.nameEn || "");
+  formData.append("province", state.admin.province || city?.province || publishCityName);
+  formData.append("cityAdcode", state.admin.cityAdcode || city?.adcode || "");
+  formData.append("cityLongitude", state.admin.cityLongitude || state.admin.longitude);
+  formData.append("cityLatitude", state.admin.cityLatitude || state.admin.latitude);
+  formData.append("title", state.admin.title || "Untitled Frame");
+  formData.append("shotAt", state.admin.shotAt || new Date().toISOString().slice(0, 10));
+  formData.append("camera", state.admin.camera || city?.gear || "");
+  formData.append("location", state.admin.selectedPoiName);
+  formData.append("selectedPoiName", state.admin.selectedPoiName);
+  formData.append("locationSource", state.admin.locationSource);
+  formData.append("districtCode", state.admin.districtCode);
+  formData.append("districtName", state.admin.districtName);
+  formData.append("streetName", state.admin.streetName);
+  formData.append("longitude", state.admin.longitude);
+  formData.append("latitude", state.admin.latitude);
+  formData.append("description", state.admin.description);
+  formData.append("tags", state.admin.tags);
+  formData.append("published", String(state.admin.published));
+  formData.append("isCover", String(state.admin.isCover));
+  state.admin.files.forEach((file) => formData.append("photos", file));
+
+  state.admin.statusKind = "progress";
+  state.admin.status = "正在发布…";
+  renderApp();
+
+  try {
+    const payload = await apiFetch("/admin/photos", {
+      method: "POST",
+      body: formData,
+    });
+    state.admin.statusKind = "success";
+    state.admin.status = "发布成功，地图已刷新。";
+    resetAdminForm(payload.city?.id || city?.id || null);
+    await loadCities();
+    const nextCitySlug = payload.city?.slug || city?.slug || "";
+    if (nextCitySlug) {
+      const refreshedCity = getCityBySlug(nextCitySlug);
+      if (refreshedCity?.collections.length) {
+        state.citySelection.activeCollectionKeyByCity[refreshedCity.slug] = refreshedCity.collections[0].key;
+        state.citySelection.shouldFocusDistrictByCity[refreshedCity.slug] = false;
+      }
+      navigate(`#/city/${nextCitySlug}`);
+      return;
+    }
+    navigate("#/map");
+  } catch (error) {
+    state.admin.statusKind = "error";
+    state.admin.status = error.message || "发布失败";
+    renderApp();
+  }
+}
+
+function resetAdminForm(cityId = null) {
+  state.admin.cityId = cityId;
+  state.admin.cityName = "";
+  state.admin.cityNameEn = "";
+  state.admin.province = "";
+  state.admin.cityAdcode = "";
+  state.admin.cityLongitude = "";
+  state.admin.cityLatitude = "";
+  state.admin.title = "";
+  state.admin.shotAt = "";
+  state.admin.camera = "";
+  state.admin.tags = "";
+  state.admin.description = "";
+  state.admin.searchKeyword = "";
+  state.admin.searchResults = [];
+  state.admin.districtCode = "";
+  state.admin.districtName = "";
+  state.admin.streetName = "";
+  state.admin.longitude = "";
+  state.admin.latitude = "";
+  state.admin.locationLabel = "";
+  state.admin.selectedPoiName = "";
+  state.admin.locationSource = "";
+  state.admin.files = [];
+  state.admin.previews = [];
+  state.admin.status = "";
+  state.admin.statusKind = "neutral";
+}
+
+function bindEvents() {
+  document.addEventListener("click", async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const cityButton = target.closest("[data-city-open]");
+    if (cityButton) {
+      const slug = cityButton.getAttribute("data-city-open");
+      state.citySelection.activeSlug = slug;
+      state.citySelection.shouldFocusDistrictByCity[slug] = false;
+      navigate(`#/city/${slug}`);
+      return;
+    }
+
+    const collectionButton = target.closest("[data-collection-key]");
+    if (collectionButton) {
+      const citySlug = collectionButton.getAttribute("data-city-slug");
+      const key = collectionButton.getAttribute("data-collection-key");
+      state.citySelection.activeCollectionKeyByCity[citySlug] = key;
+      state.citySelection.shouldFocusDistrictByCity[citySlug] = true;
+      renderApp();
+      return;
+    }
+
+    const photoButton = target.closest("[data-photo-open]");
+    if (photoButton) {
+      const [citySlug, collectionKey, photoId] = (photoButton.getAttribute("data-photo-open") || "").split(":");
+      const city = getCityBySlug(citySlug);
+      const collection = city?.collections.find((item) => item.key === collectionKey);
+      const photo = collection?.photos.find((item) => item.id === photoId);
+      if (collection && photo) {
+        await focusPhotoOnCityMap(collection, photo);
+      }
+      if (city && collection) {
+        openLightbox(city, collection, photoId);
+      }
+      return;
+    }
+
+    const dismissLayer = target.closest("[data-lightbox-dismiss]");
+    const lightboxPanel = target.closest("[data-lightbox-panel]");
+    if (target.closest("[data-lightbox-close]") || (dismissLayer && !lightboxPanel)) {
+      closeLightbox();
+      return;
+    }
+
+    if (target.closest("[data-login-submit]")) {
+      await handleLogin();
+      return;
+    }
+
+    if (target.closest("[data-logout]")) {
+      handleLogout();
+      return;
+    }
+
+    if (target.closest("[data-admin-search]")) {
+      await handleAdminSearch();
+      return;
+    }
+
+    const searchPick = target.closest("[data-search-pick]");
+    if (searchPick) {
+      const index = Number(searchPick.getAttribute("data-search-pick"));
+      const item = state.admin.searchResults[index];
+      if (item) {
+        state.admin.searchKeyword = item.name;
+        state.admin.searchResults = [];
+        applyAdminCityContext(item);
+        await setAdminLocationFromLngLat(getAdminContextCity(), item.location, item.name, "poi");
+      }
+      return;
+    }
+
+    if (target.closest("[data-admin-publish]")) {
+      await handlePublish();
+    }
+  });
+
+  document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    if (target.matches("[data-admin-files]")) {
+      handleFiles(target.files);
+    }
+  });
+
+  document.addEventListener("input", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const field = target.getAttribute("data-admin-field");
+    if (field && field in state.admin) {
+      state.admin[field] = target.value;
+      if (field === "searchKeyword") {
+        state.admin.cityId = null;
+        state.admin.cityName = "";
+        state.admin.cityNameEn = "";
+        state.admin.province = "";
+        state.admin.cityAdcode = "";
+        state.admin.cityLongitude = "";
+        state.admin.cityLatitude = "";
+        state.admin.selectedPoiName = "";
+        state.admin.locationSource = "";
+      }
+      return;
+    }
+  });
+
+  window.addEventListener("hashchange", () => {
+    state.route = parseHash();
+    if (state.route.name === "city" && state.route.slug) {
+      state.citySelection.activeSlug = state.route.slug;
+      if (!state.citySelection.activeCollectionKeyByCity[state.route.slug]) {
+        const city = getCityBySlug(state.route.slug);
+        state.citySelection.activeCollectionKeyByCity[state.route.slug] = city?.collections[0]?.key || null;
+      }
+    }
+    renderApp();
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (!state.lightbox.open) {
+      return;
+    }
+    if (event.key === "Escape") {
+      closeLightbox();
+      return;
+    }
+    if (event.key === "ArrowRight") {
+      shiftLightbox(1);
+      return;
+    }
+    if (event.key === "ArrowLeft") {
+      shiftLightbox(-1);
+    }
+  });
 }
 
 function init() {
