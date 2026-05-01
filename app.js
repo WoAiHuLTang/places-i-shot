@@ -2756,6 +2756,27 @@ function applyAdminCityContext(item) {
 }
 
 function renderAdminLibrarySection() {
+  if (!state.auth.token) {
+    return "";
+  }
+
+  if (state.ui.apiMode !== "live") {
+    return `
+      <section class="admin-library">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Library</span>
+            <h2>已上传照片</h2>
+          </div>
+        </div>
+        <div class="admin-library-empty">
+          <strong>当前是演示数据。</strong>
+          <span>已上传照片管理只会在真实后端连接成功后显示，示例城市图片不会再进入删除区。</span>
+        </div>
+      </section>
+    `;
+  }
+
   const libraryCity = getAdminLibraryCity();
   const manageableCities = state.cities.filter((city) => city.photoCount > 0 || city.slug === libraryCity?.slug);
 
