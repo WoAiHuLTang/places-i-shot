@@ -4,7 +4,7 @@ import multer from "multer";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { config, assertConfig } from "./config.js";
+import { config, assertConfig, isAllowedOrigin } from "./config.js";
 import { pool } from "./db.js";
 import { requireAdmin, signAdminToken, verifyPassword } from "./auth.js";
 import { uploadBufferToCos } from "./cos.js";
@@ -15,7 +15,13 @@ const app = express();
 
 app.use(
   cors({
-    origin: config.appOrigin,
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error(`Origin not allowed by CORS: ${origin || "unknown"}`));
+    },
     credentials: false,
   })
 );
@@ -27,6 +33,7 @@ app.get("/api/health", async (_request, response) => {
     ok: true,
     configReady: missing.length === 0,
     missing,
+    allowedOrigins: config.appOrigins,
   });
 });
 
@@ -82,6 +89,7 @@ app.get("/api/admin/cities", requireAdmin, async (_request, response, next) => {
           c.name,
           c.name_en AS nameEn,
           c.province,
+          c.adcode,
           COUNT(p.id) AS photoCount
         FROM cities c
         LEFT JOIN photos p ON p.city_id = c.id AND p.is_published = 1
@@ -114,6 +122,11 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
     const shotAt = request.body.shotAt || new Date().toISOString().slice(0, 10);
     const camera = request.body.camera || "";
     const location = request.body.location || "";
+    const districtCode = request.body.districtCode || "";
+    const districtName = request.body.districtName || "";
+    const streetName = request.body.streetName || "";
+    const longitude = request.body.longitude ? Number(request.body.longitude) : null;
+    const latitude = request.body.latitude ? Number(request.body.latitude) : null;
     const description = request.body.description || "";
     const tags = String(request.body.tags || "")
       .split(",")
@@ -149,9 +162,9 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
       await connection.query(
         `
           INSERT INTO photos
-            (id, city_id, title, shot_at, camera, location_name, description, image_url, is_cover, is_published)
+            (id, city_id, title, shot_at, camera, location_name, district_code, district_name, street_name, longitude, latitude, description, image_url, is_cover, is_published)
           VALUES
-            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         [
           photoId,
@@ -160,6 +173,11 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
           shotAt,
           camera,
           location,
+          districtCode,
+          districtName,
+          streetName,
+          longitude,
+          latitude,
           description,
           imageUrl,
           isCover && index === 0 ? 1 : 0,

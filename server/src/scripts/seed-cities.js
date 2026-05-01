@@ -5,13 +5,14 @@ for (const city of seedCities) {
   await pool.query(
     `
       INSERT INTO cities
-        (slug, name, name_en, province, coord_x, coord_y, description, gear)
+        (slug, name, name_en, province, adcode, coord_x, coord_y, description, gear)
       VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON DUPLICATE KEY UPDATE
         name = VALUES(name),
         name_en = VALUES(name_en),
         province = VALUES(province),
+        adcode = VALUES(adcode),
         coord_x = VALUES(coord_x),
         coord_y = VALUES(coord_y),
         description = VALUES(description),

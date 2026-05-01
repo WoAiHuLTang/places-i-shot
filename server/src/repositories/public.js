@@ -17,6 +17,11 @@ async function getPublishedPhotos(cityId) {
         shot_at AS shotAt,
         camera,
         location_name AS location,
+        district_code AS districtCode,
+        district_name AS districtName,
+        street_name AS streetName,
+        longitude,
+        latitude,
         description,
         image_url AS imageUrl,
         is_cover AS isCover
@@ -31,6 +36,8 @@ async function getPublishedPhotos(cityId) {
     rows.map(async (photo) => ({
       ...photo,
       isCover: Boolean(photo.isCover),
+      longitude: photo.longitude === null ? null : Number(photo.longitude),
+      latitude: photo.latitude === null ? null : Number(photo.latitude),
       tags: await getPhotoTags(photo.id),
     }))
   );
@@ -45,6 +52,7 @@ export async function listPublicCities() {
         name,
         name_en AS nameEn,
         province,
+        adcode,
         coord_x AS coordX,
         coord_y AS coordY,
         description,
@@ -57,6 +65,7 @@ export async function listPublicCities() {
   return Promise.all(
     cities.map(async (city) => ({
       ...city,
+      adcode: city.adcode,
       coordinates: {
         x: Number(city.coordX),
         y: Number(city.coordY),

@@ -2,9 +2,17 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+function parseOrigins() {
+  const rawOrigins = process.env.APP_ORIGINS || process.env.APP_ORIGIN || "http://127.0.0.1:5500";
+  return rawOrigins
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export const config = {
   port: Number(process.env.PORT || 8787),
-  appOrigin: process.env.APP_ORIGIN || "http://127.0.0.1:5500",
+  appOrigins: parseOrigins(),
   jwtSecret: process.env.JWT_SECRET || "",
   mysql: {
     host: process.env.MYSQL_HOST || "127.0.0.1",
@@ -21,6 +29,13 @@ export const config = {
     publicBaseUrl: process.env.COS_PUBLIC_BASE_URL || "",
   },
 };
+
+export function isAllowedOrigin(origin) {
+  if (!origin) {
+    return true;
+  }
+  return config.appOrigins.includes(origin);
+}
 
 export function assertConfig() {
   const missing = [];

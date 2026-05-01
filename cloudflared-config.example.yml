@@ -1,0 +1,7 @@
+tunnel: ef265b74-e6ef-4bf4-8ef5-1c9d7213fe36
+credentials-file: C:\Users\YourUser\.cloudflared\ef265b74-e6ef-4bf4-8ef5-1c9d7213fe36.json
+
+ingress:
+  - hostname: api.zeking.site
+    service: http://127.0.0.1:8787
+  - service: http_status:404

@@ -1,87 +1,169 @@
 # Places I Shot
 
-一个面向长期运营的摄影作品站骨架：
+一个以中国地图为入口的摄影作品站。
 
-- 前端展示站继续保留中国地图主视觉，适合部署到 Netlify
-- 管理后台改为真实 API 登录与上传
-- 图片存储目标为腾讯云 COS
-- 城市与照片元数据存放在 MySQL
+当前版本的核心结构是：
 
-## 目录
+- 前端静态站：`index.html` `styles.css` `app.js`
+- 后端 API：`server/`
+- 图片存储：腾讯云 COS
+- 数据库存储：MySQL
+- 前端托管：Netlify
+- 本地 API 暴露：Cloudflare Tunnel
 
-- `index.html` `styles.css` `app.js`
-  前端静态站
+## 现在的地图交互
+
+- 首页是完整中国地图
+- 有作品的城市会高亮显示
+- 点击城市后进入真实城市地图
+- 城市页会展示真实行政区边界
+- 有作品的行政区会高亮
+- 点击行政区后，下面展开该区的照片集合
+- 点击照片后进入大图浏览
+
+## 现在的后台上传
+
+- 登录后台后，先选择城市
+- 在真实地图上点击位置，自动反查区 / 街道 / 坐标
+- 再上传照片并发布
+- 发布后会把图片写入腾讯云 COS，把元数据写入 MySQL
+
+## 关键文件
+
 - `site-config.js`
-  前端 API 地址配置
-- `server/`
-  Express API、MySQL、COS 上传、管理员登录
-- `server/sql/schema.sql`
-  数据库建表脚本
+  前端 API 与高德地图配置
 - `server/.env.example`
-  服务器环境变量模板
+  后端环境变量模板
+- `server/sql/schema.sql`
+  最新完整建表脚本
+- `server/sql/migrations/20260501_add_geo_fields.sql`
+  给旧库补行政区与坐标字段的迁移脚本
+- `server/src/data/cities.js`
+  种子城市与真实中心点 / adcode
 
-## 当前行为
+## 前端配置
 
-- 前端会优先请求 `site-config.js` 里配置的 API
-- 如果 API 不可达，会自动退回到演示数据模式
-- 后台登录与上传只在连接到真实 API 时可用
-
-## 前端部署到 Netlify
-
-1. 把仓库推到 GitHub
-2. 在 Netlify 中导入仓库
-3. Publish directory 保持根目录
-4. 部署后绑定 `www.你的域名`
-5. 将 `site-config.js` 中的 `apiBaseUrl` 改成你的 API 地址，例如：
+把 `site-config.js` 改成你自己的正式配置：
 
 ```js
 window.PLACES_CONFIG = {
-  apiBaseUrl: "https://api.your-domain.com/api",
+  apiBaseUrl: "https://api.zeking.site/api",
+  amapKey: "你的高德地图 Web Key",
+  amapSecurityJsCode: "你的高德安全密钥",
+  amapStyle: "amap://styles/normal",
 };
 ```
 
-## 后端部署到腾讯云服务器
+如果 `amapKey` 为空，页面会正常打开，但地图区域会显示配置提示。
 
-1. 在服务器安装 Node.js 20+ 和 MySQL 8+
-2. 执行 `server/sql/schema.sql`
-3. 复制 `server/.env.example` 为 `server/.env` 并填写真实配置
-4. 安装依赖：
+## 后端配置
 
-```bash
+复制环境变量模板：
+
+```powershell
 cd server
+Copy-Item .env.example .env
+```
+
+然后填写：
+
+- `APP_ORIGINS`
+- `MYSQL_HOST`
+- `MYSQL_PORT`
+- `MYSQL_DATABASE`
+- `MYSQL_USER`
+- `MYSQL_PASSWORD`
+- `JWT_SECRET`
+- `COS_REGION`
+- `COS_BUCKET`
+- `COS_SECRET_ID`
+- `COS_SECRET_KEY`
+- `COS_PUBLIC_BASE_URL`
+
+推荐：
+
+```env
+APP_ORIGINS=http://127.0.0.1:5500,https://zeking.site,https://www.zeking.site
+```
+
+## 本地初始化命令
+
+1. 安装后端依赖
+
+```powershell
+cd E:\VscodeProject\imageShow\server
 npm install
 ```
 
-5. 导入城市数据：
+2. 导入数据库结构
 
-```bash
+```powershell
+Get-Content .\sql\schema.sql | mysql -u root -p places_i_shot
+```
+
+如果你已经有旧库，执行迁移：
+
+```powershell
+Get-Content .\sql\migrations\20260501_add_geo_fields.sql | mysql -u root -p places_i_shot
+```
+
+3. 重新写入城市中心点与 adcode
+
+```powershell
 npm run seed:cities
 ```
 
-6. 创建管理员：
+4. 创建管理员
 
-```bash
-npm run create-admin -- admin@example.com your-password
+```powershell
+npm run create-admin -- admin@example.com 你的密码
 ```
 
-7. 启动 API：
+5. 启动后端
 
-```bash
+```powershell
 npm run start
 ```
 
-## 推荐正式域名结构
+## 常用命令
 
-- `www.your-domain.com`
-  Netlify 前端
-- `api.your-domain.com`
-  腾讯云服务器 API
-- `your-bucket.cos.ap-guangzhou.myqcloud.com`
-  腾讯云 COS 图片存储
+前端语法检查：
 
-## 接下来最值得做的事
+```powershell
+cd E:\VscodeProject\imageShow
+node --check app.js
+```
 
-1. 用真实摄影作品替换演示占位图
-2. 给城市详情补充编辑接口和封面设置接口
-3. 为后台增加作品隐藏、排序和删除能力
-4. 之后再接更精细的中国地图 SVG 或 GeoJSON
+后端语法检查：
+
+```powershell
+cd E:\VscodeProject\imageShow
+node --check server\src\server.js
+```
+
+本地 PM2：
+
+```powershell
+cd E:\VscodeProject\imageShow
+npm install pm2 --save-dev
+npx pm2 start ecosystem.config.cjs
+npx pm2 save
+```
+
+Cloudflare Tunnel：
+
+```powershell
+cloudflared tunnel run places-api
+```
+
+## 上线前再确认
+
+- `https://api.zeking.site/api/health`
+- `https://zeking.site`
+- `https://www.zeking.site`
+- `https://zeking.site/#/admin`
+- `https://www.zeking.site/#/admin`
+
+## 安全提醒
+
+如果你之前泄露过腾讯云 `SecretId / SecretKey`，一定要先去腾讯云 CAM 删除旧密钥并重建新密钥，再继续使用这个项目。

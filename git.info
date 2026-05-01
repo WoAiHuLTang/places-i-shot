@@ -1,0 +1,18 @@
+cd D:\Desktop\Myproject\competition\codev1
+
+git init
+
+git config --global user.name "WoAiHuLTang"
+git config --global user.email "woaihulatang@outlook.com"
+
+git status
+
+git add .
+
+git commit -m "Initial production scaffold"
+
+git branch -M main
+
+git remote add origin https://github.com/WoAiHuLTang/places-i-shot.git
+
+git push -u origin main
