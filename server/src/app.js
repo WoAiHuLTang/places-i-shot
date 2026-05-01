@@ -121,7 +121,9 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
     const title = request.body.title || "Untitled Frame";
     const shotAt = request.body.shotAt || new Date().toISOString().slice(0, 10);
     const camera = request.body.camera || "";
-    const location = request.body.location || "";
+    const locationSource = String(request.body.locationSource || "").trim();
+    const selectedPoiName = String(request.body.selectedPoiName || "").trim();
+    const location = selectedPoiName || request.body.location || "";
     const districtCode = request.body.districtCode || "";
     const districtName = request.body.districtName || "";
     const streetName = request.body.streetName || "";
@@ -134,6 +136,11 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
       .filter(Boolean);
     const published = request.body.published !== "false";
     const isCover = request.body.isCover !== "false";
+
+    if (locationSource !== "poi" || !selectedPoiName) {
+      response.status(400).json({ error: "A specific POI selection is required before publishing" });
+      return;
+    }
 
     await connection.beginTransaction();
 

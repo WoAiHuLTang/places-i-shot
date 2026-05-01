@@ -230,6 +230,7 @@ const state = {
     files: [],
     previews: [],
     status: "",
+    statusKind: "neutral",
     published: true,
     isCover: true,
   },
@@ -1013,7 +1014,7 @@ function renderAdminPage() {
       </div>
       <div class="admin-layout">
         <article class="form-panel">
-          ${state.admin.status ? `<div class="status-banner">${escapeHtml(state.admin.status)}</div>` : ""}
+          ${state.admin.status ? `<div class="status-banner is-${escapeHtml(state.admin.statusKind || "neutral")}">${escapeHtml(state.admin.status)}</div>` : ""}
           <div class="form-grid">
             <label class="field">
               <span>城市</span>
@@ -1890,6 +1891,8 @@ function bindEvents() {
       state.admin.longitude = "";
       state.admin.latitude = "";
       state.admin.locationLabel = "";
+      state.admin.selectedPoiName = "";
+      state.admin.locationSource = "";
       renderApp();
       return;
     }
@@ -1908,6 +1911,10 @@ function bindEvents() {
     const field = target.getAttribute("data-admin-field");
     if (field && field in state.admin) {
       state.admin[field] = target.value;
+      if (field === "searchKeyword") {
+        state.admin.selectedPoiName = "";
+        state.admin.locationSource = "";
+      }
       return;
     }
   });
@@ -2200,6 +2207,346 @@ async function setAdminLocationFromLngLat(city, point, preferredLabel = "") {
     state.admin.status = error.message || "无法解析当前位置";
     renderApp();
   }
+}
+
+function renderCollectionCards(city) {
+  if (!city.collections.length) {
+    return `<div class="empty-card">还没有可浏览的地点集合。</div>`;
+  }
+  const activeCollection = getSelectedCollection(city);
+  return city.collections
+    .map(
+      (collection) => `
+        <button
+          class="collection-card ${activeCollection?.key === collection.key ? "is-active" : ""}"
+          type="button"
+          data-collection-key="${escapeHtml(collection.key)}"
+          data-city-slug="${city.slug}"
+        >
+          <div class="collection-card-cover" style="background-image:url('${collection.cover}')"></div>
+          <div class="collection-card-body">
+            <span class="collection-card-kicker">Location</span>
+            <strong>${escapeHtml(collection.label)}</strong>
+            <span>${escapeHtml(
+              collection.districtName && collection.districtName !== collection.label
+                ? collection.districtName
+                : `${collection.count} 张照片`
+            )}</span>
+            <small>${collection.latestShotAt ? escapeHtml(formatDate(collection.latestShotAt)) : "持续归档中"}</small>
+          </div>
+        </button>
+      `
+    )
+    .join("");
+}
+
+function renderPhotoGrid(collection, city) {
+  if (!collection) {
+    return `<div class="empty-card">先点开一个地点集合。</div>`;
+  }
+
+  return `
+    <div class="gallery-head">
+      <div>
+        <span class="eyebrow">Location</span>
+        <h2>${escapeHtml(collection.label)}</h2>
+      </div>
+      <div class="gallery-meta">
+        <span>${collection.count} 张</span>
+        ${collection.latestShotAt ? `<span>${escapeHtml(formatDate(collection.latestShotAt))}</span>` : ""}
+      </div>
+    </div>
+    <div class="photo-grid">
+      ${collection.photos
+        .map(
+          (photo, index) => `
+            <button
+              class="photo-card ${getPhotoCardClass(index)}"
+              type="button"
+              data-photo-open="${city.slug}:${collection.key}:${photo.id}:${index}"
+              style="background-image:url('${photo.imageUrl}')"
+            >
+              <span class="photo-card-topline">${escapeHtml(formatDate(photo.shotAt))}</span>
+              <span class="photo-card-overlay">
+                <strong>${escapeHtml(photo.title)}</strong>
+                <span>${escapeHtml(photo.streetName || photo.location || collection.label)}</span>
+              </span>
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderAdminPage() {
+  if (!state.auth.token) {
+    return renderLoginPanel();
+  }
+
+  const city = state.cities.find((item) => item.id === Number(state.admin.cityId)) || state.cities[0] || null;
+  const canPublish = Boolean(
+    city &&
+      state.admin.files.length &&
+      state.admin.longitude &&
+      state.admin.latitude &&
+      state.admin.selectedPoiName &&
+      state.admin.locationSource === "poi"
+  );
+
+  return `
+    <section class="page admin-page">
+      <div class="page-head compact">
+        <div class="page-head-copy">
+          <span class="eyebrow">Upload</span>
+          <h1>地点上传</h1>
+          <p>先搜索并选中一个具体地点 POI，再发布这一组照片。</p>
+        </div>
+        <button class="ghost-button" type="button" data-logout>退出</button>
+      </div>
+      <div class="admin-layout">
+        <article class="form-panel">
+          ${state.admin.status ? `<div class="status-banner is-${escapeHtml(state.admin.statusKind || "neutral")}">${escapeHtml(state.admin.status)}</div>` : ""}
+          <div class="form-grid">
+            <label class="field">
+              <span>城市</span>
+              <select class="input" data-admin-field="cityId">
+                ${state.cities
+                  .map(
+                    (item) => `
+                      <option value="${item.id}" ${Number(state.admin.cityId) === item.id ? "selected" : ""}>
+                        ${escapeHtml(item.name)}
+                      </option>
+                    `
+                  )
+                  .join("")}
+              </select>
+            </label>
+            <label class="field">
+              <span>标题</span>
+              <input class="input" type="text" data-admin-field="title" value="${escapeHtml(state.admin.title)}" placeholder="例如：雨后桥边" />
+            </label>
+            <label class="field">
+              <span>日期</span>
+              <input class="input" type="date" data-admin-field="shotAt" value="${escapeHtml(state.admin.shotAt)}" />
+            </label>
+            <label class="field">
+              <span>器材</span>
+              <input class="input" type="text" data-admin-field="camera" value="${escapeHtml(state.admin.camera)}" placeholder="例如：Leica Q3" />
+            </label>
+            <label class="field field-full">
+              <span>搜索具体地点</span>
+              <div class="search-line">
+                <input
+                  class="input"
+                  type="text"
+                  data-admin-field="searchKeyword"
+                  value="${escapeHtml(state.admin.searchKeyword)}"
+                  placeholder="例如：西泠桥 / 湖滨银泰 / 灵隐路口"
+                />
+                <button class="ghost-button" type="button" data-admin-search>搜索</button>
+              </div>
+              ${renderSearchResults()}
+              <span class="mini-note">只有从搜索结果里选中的具体地点，才允许发布。</span>
+            </label>
+            <div class="field field-full">
+              <span>已选择的位置</span>
+              <div class="location-pills">
+                <span class="info-pill">${escapeHtml(state.admin.selectedPoiName || "具体地点 POI")}</span>
+                <span class="info-pill">${escapeHtml(state.admin.districtName || "区 / 县")}</span>
+                <span class="info-pill">${escapeHtml(state.admin.streetName || "街道")}</span>
+                <span class="info-pill">${escapeHtml(
+                  state.admin.longitude && state.admin.latitude
+                    ? `${state.admin.longitude}, ${state.admin.latitude}`
+                    : "坐标"
+                )}</span>
+              </div>
+              <input
+                class="input subtle-input"
+                type="text"
+                value="${escapeHtml(state.admin.locationLabel)}"
+                readonly
+                placeholder="选中搜索结果后，这里会自动填入地点信息"
+              />
+            </div>
+            <label class="field field-full">
+              <span>标签</span>
+              <input class="input" type="text" data-admin-field="tags" value="${escapeHtml(state.admin.tags)}" placeholder="街拍, 建筑, 夜景" />
+            </label>
+            <label class="field field-full">
+              <span>描述</span>
+              <textarea class="input textarea" data-admin-field="description" placeholder="少量描述即可。">${escapeHtml(
+                state.admin.description
+              )}</textarea>
+            </label>
+            <label class="field field-full">
+              <span>照片</span>
+              <input class="input file-input" type="file" accept="image/*" multiple data-admin-files />
+            </label>
+          </div>
+          ${
+            state.admin.previews.length
+              ? `
+                <div class="preview-grid">
+                  ${state.admin.previews
+                    .map(
+                      (preview) => `
+                        <div class="preview-card">
+                          <div class="preview-image" style="background-image:url('${preview.src}')"></div>
+                          <span>${escapeHtml(preview.name)}</span>
+                        </div>
+                      `
+                    )
+                    .join("")}
+                </div>
+              `
+              : ""
+          }
+          <div class="actions">
+            <button class="primary-button" type="button" data-admin-publish ${canPublish ? "" : "disabled"}>
+              发布到 ${city ? escapeHtml(city.name) : "当前城市"}
+            </button>
+          </div>
+        </article>
+        <article class="map-card admin-map-card">
+          <div class="admin-map-head">
+            <div>
+              <span class="eyebrow">Picker</span>
+              <h2>${city ? escapeHtml(city.name) : "选择城市"}</h2>
+            </div>
+            <span class="mini-note">地图点选只用于辅助查看位置，不作为最终发布依据。</span>
+          </div>
+          <div class="map-stage admin-stage" id="admin-map">
+            ${!CONFIG.amapKey ? renderMapUnavailable("需要高德地图 Key 才能在后台点选真实位置。") : ""}
+          </div>
+        </article>
+      </div>
+    </section>
+  `;
+}
+
+async function setAdminLocationFromLngLat(city, point, preferredLabel = "") {
+  try {
+    const info = await reverseGeocode(city, point);
+    const isPoiSelection = Boolean(preferredLabel);
+    state.admin.districtCode = info.districtCode;
+    state.admin.districtName = info.districtName;
+    state.admin.streetName = info.streetName;
+    state.admin.locationLabel = preferredLabel || info.locationLabel;
+    state.admin.longitude = info.longitude;
+    state.admin.latitude = info.latitude;
+    state.admin.selectedPoiName = isPoiSelection ? preferredLabel : "";
+    state.admin.locationSource = isPoiSelection ? "poi" : "map";
+    state.admin.statusKind = "neutral";
+    state.admin.status = isPoiSelection
+      ? `已锁定地点：${preferredLabel}`
+      : "当前只是地图定位，请从搜索结果中选择一个具体地点 POI 才能发布。";
+    const AMap = await loadAMap();
+    placeAdminMarker(AMap, point);
+    if (mapStore.admin) {
+      mapStore.admin.panTo([point.lng, point.lat]);
+      mapStore.admin.setZoom(14.5);
+    }
+    renderApp();
+  } catch (error) {
+    state.admin.statusKind = "error";
+    state.admin.status = error.message || "无法解析当前位置";
+    renderApp();
+  }
+}
+
+async function handlePublish() {
+  const city = state.cities.find((item) => item.id === Number(state.admin.cityId)) || null;
+  if (!city) {
+    state.admin.statusKind = "error";
+    state.admin.status = "请先选择城市。";
+    renderApp();
+    return;
+  }
+  if (!state.admin.files.length) {
+    state.admin.statusKind = "error";
+    state.admin.status = "请至少选择一张照片。";
+    renderApp();
+    return;
+  }
+  if (!state.admin.longitude || !state.admin.latitude || !state.admin.districtName) {
+    state.admin.statusKind = "error";
+    state.admin.status = "请先确认地图位置。";
+    renderApp();
+    return;
+  }
+  if (state.admin.locationSource !== "poi" || !state.admin.selectedPoiName) {
+    state.admin.statusKind = "error";
+    state.admin.status = "请先从搜索结果中选择一个具体地点 POI，再发布照片。";
+    renderApp();
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("cityId", String(city.id));
+  formData.append("title", state.admin.title || "Untitled Frame");
+  formData.append("shotAt", state.admin.shotAt || new Date().toISOString().slice(0, 10));
+  formData.append("camera", state.admin.camera || city.gear || "");
+  formData.append("location", state.admin.selectedPoiName);
+  formData.append("selectedPoiName", state.admin.selectedPoiName);
+  formData.append("locationSource", state.admin.locationSource);
+  formData.append("districtCode", state.admin.districtCode);
+  formData.append("districtName", state.admin.districtName);
+  formData.append("streetName", state.admin.streetName);
+  formData.append("longitude", state.admin.longitude);
+  formData.append("latitude", state.admin.latitude);
+  formData.append("description", state.admin.description);
+  formData.append("tags", state.admin.tags);
+  formData.append("published", String(state.admin.published));
+  formData.append("isCover", String(state.admin.isCover));
+  state.admin.files.forEach((file) => formData.append("photos", file));
+
+  state.admin.statusKind = "progress";
+  state.admin.status = "正在发布…";
+  renderApp();
+
+  try {
+    await apiFetch("/admin/photos", {
+      method: "POST",
+      body: formData,
+    });
+    state.admin.statusKind = "success";
+    state.admin.status = "发布成功，地图已刷新。";
+    resetAdminForm(city.id);
+    await loadCities();
+    const refreshedCity = getCityBySlug(city.slug);
+    if (refreshedCity?.collections.length) {
+      state.citySelection.activeCollectionKeyByCity[refreshedCity.slug] = refreshedCity.collections[0].key;
+      state.citySelection.shouldFocusDistrictByCity[refreshedCity.slug] = false;
+    }
+    navigate(`#/city/${city.slug}`);
+  } catch (error) {
+    state.admin.statusKind = "error";
+    state.admin.status = error.message || "发布失败";
+    renderApp();
+  }
+}
+
+function resetAdminForm(cityId) {
+  state.admin.title = "";
+  state.admin.shotAt = "";
+  state.admin.camera = "";
+  state.admin.tags = "";
+  state.admin.description = "";
+  state.admin.searchKeyword = "";
+  state.admin.searchResults = [];
+  state.admin.districtCode = "";
+  state.admin.districtName = "";
+  state.admin.streetName = "";
+  state.admin.longitude = "";
+  state.admin.latitude = "";
+  state.admin.locationLabel = "";
+  state.admin.selectedPoiName = "";
+  state.admin.locationSource = "";
+  state.admin.files = [];
+  state.admin.previews = [];
+  state.admin.cityId = cityId;
+  state.admin.statusKind = "neutral";
 }
 
 function renderCollectionCards(city) {

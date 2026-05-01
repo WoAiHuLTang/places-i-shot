@@ -213,6 +213,24 @@ img {
   border: 1px solid var(--line);
 }
 
+.status-banner.is-progress {
+  color: #355883;
+  background: rgba(232, 241, 253, 0.96);
+  border-color: rgba(110, 154, 210, 0.28);
+}
+
+.status-banner.is-success {
+  color: #2f6a4e;
+  background: rgba(234, 247, 239, 0.96);
+  border-color: rgba(112, 182, 136, 0.24);
+}
+
+.status-banner.is-error {
+  color: #8f443f;
+  background: rgba(255, 233, 230, 0.92);
+  border-color: rgba(192, 103, 95, 0.2);
+}
+
 .error-banner {
   color: #8f443f;
   background: rgba(255, 233, 230, 0.92);
@@ -494,6 +512,14 @@ img {
   color: #ffffff;
   background: linear-gradient(180deg, #7da6de 0%, #5f8fce 100%);
   box-shadow: 0 14px 34px rgba(95, 143, 206, 0.22);
+}
+
+.ghost-button:disabled,
+.primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+  transform: none;
+  box-shadow: none;
 }
 
 .back-link:hover,
