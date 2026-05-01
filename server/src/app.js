@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { config, assertConfig, isAllowedOrigin } from "./config.js";
 import { pool } from "./db.js";
 import { requireAdmin, signAdminToken, verifyPassword } from "./auth.js";
-import { uploadBufferToCos } from "./cos.js";
+import { deleteObjectFromCosUrl, uploadBufferToCos } from "./cos.js";
 import { listPublicCities } from "./repositories/public.js";
 import { getTableColumns } from "./schema.js";
 
@@ -358,6 +358,67 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
         slug: city.slug,
         name: city.name,
       },
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+});
+
+app.delete("/api/admin/photos/:photoId", requireAdmin, async (request, response, next) => {
+  const connection = await pool.getConnection();
+
+  try {
+    const photoId = String(request.params.photoId || "").trim();
+    if (!photoId) {
+      response.status(400).json({ error: "Photo id is required" });
+      return;
+    }
+
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query(
+      `
+        SELECT
+          id,
+          city_id AS cityId,
+          image_url AS imageUrl
+        FROM photos
+        WHERE id = ?
+        LIMIT 1
+      `,
+      [photoId]
+    );
+
+    const photo = rows[0];
+    if (!photo) {
+      await connection.rollback();
+      response.status(404).json({ error: "Photo not found" });
+      return;
+    }
+
+    await connection.query("DELETE FROM photo_tags WHERE photo_id = ?", [photoId]);
+    await connection.query("DELETE FROM photos WHERE id = ?", [photoId]);
+
+    const [countRows] = await connection.query(
+      "SELECT COUNT(*) AS photoCount FROM photos WHERE city_id = ? AND is_published = 1",
+      [photo.cityId]
+    );
+
+    await connection.commit();
+
+    try {
+      await deleteObjectFromCosUrl(photo.imageUrl);
+    } catch (cosError) {
+      console.error("Failed to delete COS object", cosError);
+    }
+
+    response.json({
+      ok: true,
+      cityId: Number(photo.cityId),
+      remainingPhotoCount: Number(countRows[0]?.photoCount || 0),
     });
   } catch (error) {
     await connection.rollback();

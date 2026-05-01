@@ -235,6 +235,8 @@ const state = {
     locationSource: "",
     files: [],
     previews: [],
+    libraryCitySlug: "",
+    deletingPhotoId: "",
     status: "",
     statusKind: "neutral",
     published: true,
@@ -514,10 +516,15 @@ async function loadCities() {
   if (firstAvailableCity) {
     state.citySelection.activeSlug = firstAvailableCity.slug;
     state.admin.cityId = state.admin.cityId || firstAvailableCity.id;
+    state.admin.libraryCitySlug = state.admin.libraryCitySlug || firstAvailableCity.slug;
     if (!state.citySelection.activeCollectionKeyByCity[firstAvailableCity.slug]) {
       state.citySelection.activeCollectionKeyByCity[firstAvailableCity.slug] =
         firstAvailableCity.collections[0]?.key || null;
     }
+  }
+
+  if (state.admin.libraryCitySlug && !state.cities.some((city) => city.slug === state.admin.libraryCitySlug)) {
+    state.admin.libraryCitySlug = firstAvailableCity?.slug || "";
   }
 
   state.ui.loading = false;
@@ -1123,6 +1130,7 @@ function renderAdminPage() {
           </div>
         </article>
       </div>
+      ${renderAdminLibrarySection()}
     </section>
   `;
 }
@@ -1863,6 +1871,16 @@ function bindEvents() {
       return;
     }
 
+    const manageCityButton = target.closest("[data-admin-manage-city]");
+    if (manageCityButton) {
+      const slug = manageCityButton.getAttribute("data-admin-manage-city") || "";
+      if (slug) {
+        state.admin.libraryCitySlug = slug;
+        renderApp();
+      }
+      return;
+    }
+
     const searchPick = target.closest("[data-search-pick]");
     if (searchPick) {
       const index = Number(searchPick.getAttribute("data-search-pick"));
@@ -1878,6 +1896,13 @@ function bindEvents() {
 
     if (target.closest("[data-admin-publish]")) {
       await handlePublish();
+      return;
+    }
+
+    const deletePhotoButton = target.closest("[data-admin-delete-photo]");
+    if (deletePhotoButton) {
+      const photoId = deletePhotoButton.getAttribute("data-admin-delete-photo") || "";
+      await handleAdminPhotoDelete(photoId);
     }
   });
 
@@ -2694,6 +2719,22 @@ function getAdminContextCity() {
   };
 }
 
+function getAdminLibraryCity() {
+  if (state.admin.libraryCitySlug) {
+    const bySlug = getCityBySlug(state.admin.libraryCitySlug);
+    if (bySlug) {
+      return bySlug;
+    }
+  }
+
+  const resolved = getAdminResolvedCity();
+  if (resolved) {
+    return resolved;
+  }
+
+  return state.cities.find((city) => city.photoCount > 0) || state.cities[0] || null;
+}
+
 function applyAdminCityContext(item) {
   const cityName = simplifyCityName(item.cityName || item.province || item.district || "");
   const province = normalizeAdminText(item.province) || cityName;
@@ -2710,6 +2751,105 @@ function applyAdminCityContext(item) {
   state.admin.cityAdcode = existing?.adcode || cityAdcode;
   state.admin.cityLongitude = String(item.location?.lng ?? "");
   state.admin.cityLatitude = String(item.location?.lat ?? "");
+}
+
+function renderAdminLibrarySection() {
+  const libraryCity = getAdminLibraryCity();
+  const manageableCities = state.cities.filter((city) => city.photoCount > 0 || city.slug === libraryCity?.slug);
+
+  if (!manageableCities.length) {
+    return `
+      <section class="admin-library">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Library</span>
+            <h2>已上传照片</h2>
+          </div>
+        </div>
+        <div class="admin-library-empty">
+          <strong>还没有可管理的照片。</strong>
+          <span>先上传一组作品，之后就可以在这里删除单张照片。</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const collectionLabels = new Map();
+  if (libraryCity) {
+    for (const collection of libraryCity.collections) {
+      for (const photo of collection.photos) {
+        collectionLabels.set(photo.id, collection.label);
+      }
+    }
+  }
+
+  return `
+    <section class="admin-library">
+      <div class="section-head">
+        <div>
+          <span class="eyebrow">Library</span>
+          <h2>已上传照片</h2>
+        </div>
+      </div>
+      <div class="admin-city-rail">
+        ${manageableCities
+          .map(
+            (city) => `
+              <button
+                class="admin-city-chip ${libraryCity?.slug === city.slug ? "is-active" : ""}"
+                type="button"
+                data-admin-manage-city="${city.slug}"
+              >
+                <strong>${escapeHtml(city.name)}</strong>
+                <span>${city.photoCount} 张</span>
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+      ${
+        libraryCity?.photos.length
+          ? `
+            <div class="admin-photo-grid">
+              ${libraryCity.photos
+                .map((photo) => {
+                  const deleting = state.admin.deletingPhotoId === photo.id;
+                  const locationLabel = collectionLabels.get(photo.id) || photo.location || photo.districtName || "未命名地点";
+                  return `
+                    <article class="admin-photo-card">
+                      <div class="admin-photo-cover" style="background-image:url('${photo.imageUrl}')">
+                        ${photo.isCover ? '<span class="admin-photo-badge">封面</span>' : ""}
+                      </div>
+                      <div class="admin-photo-body">
+                        <div class="admin-photo-meta">
+                          <strong>${escapeHtml(photo.title || locationLabel)}</strong>
+                          <span>${escapeHtml(locationLabel)}</span>
+                          <small>${escapeHtml(photo.shotAt || "未记录日期")}</small>
+                        </div>
+                        <button
+                          class="danger-button"
+                          type="button"
+                          data-admin-delete-photo="${photo.id}"
+                          ${deleting ? "disabled" : ""}
+                        >
+                          ${deleting ? "删除中…" : "删除"}
+                        </button>
+                      </div>
+                    </article>
+                  `;
+                })
+                .join("")}
+            </div>
+          `
+          : `
+            <div class="admin-library-empty">
+              <strong>${escapeHtml(libraryCity?.name || "当前城市")} 目前没有照片。</strong>
+              <span>删除完最后一张后，这座城市会从首页高亮列表里自动消失。</span>
+            </div>
+          `
+      }
+    </section>
+  `;
 }
 
 function renderSearchResults() {
@@ -3204,6 +3344,7 @@ async function handlePublish() {
     await loadCities();
     const nextCitySlug = payload.city?.slug || city?.slug || "";
     if (nextCitySlug) {
+      state.admin.libraryCitySlug = nextCitySlug;
       const refreshedCity = getCityBySlug(nextCitySlug);
       if (refreshedCity?.collections.length) {
         state.citySelection.activeCollectionKeyByCity[refreshedCity.slug] = refreshedCity.collections[0].key;
@@ -3216,6 +3357,43 @@ async function handlePublish() {
   } catch (error) {
     state.admin.statusKind = "error";
     state.admin.status = error.message || "发布失败";
+    renderApp();
+  }
+}
+
+async function handleAdminPhotoDelete(photoId) {
+  if (!photoId) {
+    return;
+  }
+
+  const libraryCity = getAdminLibraryCity();
+  const targetPhoto = libraryCity?.photos.find((photo) => photo.id === photoId) || null;
+  const label = targetPhoto?.title || targetPhoto?.location || "这张照片";
+  const confirmed = window.confirm(`确定删除“${label}”吗？删除后无法恢复。`);
+  if (!confirmed) {
+    return;
+  }
+
+  state.admin.deletingPhotoId = photoId;
+  state.admin.statusKind = "progress";
+  state.admin.status = "正在删除照片…";
+  renderApp();
+
+  try {
+    const payload = await apiFetch(`/admin/photos/${encodeURIComponent(photoId)}`, {
+      method: "DELETE",
+    });
+    state.admin.deletingPhotoId = "";
+    state.admin.statusKind = "success";
+    state.admin.status =
+      Number(payload.remainingPhotoCount || 0) > 0
+        ? "照片已删除。"
+        : "最后一张照片已删除，这座城市已不再高亮。";
+    await loadCities();
+  } catch (error) {
+    state.admin.deletingPhotoId = "";
+    state.admin.statusKind = "error";
+    state.admin.status = error.message || "删除失败";
     renderApp();
   }
 }
@@ -3245,6 +3423,7 @@ function resetAdminForm(cityId = null) {
   state.admin.locationSource = "";
   state.admin.files = [];
   state.admin.previews = [];
+  state.admin.deletingPhotoId = "";
   state.admin.status = "";
   state.admin.statusKind = "neutral";
 }
