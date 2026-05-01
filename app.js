@@ -1263,26 +1263,24 @@ async function initChinaMap() {
   applyNativeMapFeatures(map);
   mapStore.china = map;
 
-  const markers = state.cities.map((city) => {
-    const highlighted = city.photoCount > 0;
+  const highlightedCities = state.cities.filter((city) => city.photoCount > 0);
+
+  const markers = highlightedCities.map((city) => {
     const marker = new AMap.Marker({
       position: [city.center.lng, city.center.lat],
       anchor: "center",
       offset: new AMap.Pixel(0, 0),
       content: `
-        <button class="city-pin ${highlighted ? "is-active" : "is-muted"}" type="button">
+        <button class="city-pin is-active" type="button">
           <span class="city-pin-halo"></span>
           <span class="city-pin-core"></span>
-          ${highlighted ? `<span class="city-pin-badge">${city.photoCount}</span>` : ""}
+          <span class="city-pin-badge">${city.photoCount}</span>
         </button>
       `,
-      extData: { slug: city.slug, highlighted },
+      extData: { slug: city.slug, highlighted: true },
     });
 
     marker.on("click", () => {
-      if (!highlighted) {
-        return;
-      }
       state.citySelection.activeSlug = city.slug;
       state.citySelection.shouldFocusDistrictByCity[city.slug] = false;
       if (!state.citySelection.activeCollectionKeyByCity[city.slug]) {
@@ -1295,7 +1293,9 @@ async function initChinaMap() {
     return marker;
   });
 
-  map.setFitView(markers, false, [120, 120, 120, 120], 6);
+  if (markers.length) {
+    map.setFitView(markers, false, [120, 120, 120, 120], 6);
+  }
 }
 
 async function initCityMap(city) {
