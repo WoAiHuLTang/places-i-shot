@@ -1315,8 +1315,21 @@ async function initCityMap(city) {
   mapStore.city = map;
 
   const districts = await fetchCityDistricts(city);
-  const byCode = new Map(city.collections.filter((item) => item.districtCode).map((item) => [item.districtCode, item]));
-  const byName = new Map(city.collections.map((item) => [item.districtName || item.label, item]));
+  const byCode = new Map();
+  const byName = new Map();
+  for (const collection of city.collections) {
+    if (collection.districtCode) {
+      const list = byCode.get(collection.districtCode) || [];
+      list.push(collection);
+      byCode.set(collection.districtCode, list);
+    }
+    const districtKey = collection.districtName || "";
+    if (districtKey) {
+      const list = byName.get(districtKey) || [];
+      list.push(collection);
+      byName.set(districtKey, list);
+    }
+  }
 
   const allPolygons = [];
   const selectedCollection = getSelectedCollection(city);
@@ -1325,31 +1338,35 @@ async function initCityMap(city) {
   let selectedFocusPoint = selectedCollection?.center ? { ...selectedCollection.center } : null;
 
   for (const district of districts) {
-    const collection = byCode.get(district.adcode) || byName.get(district.name) || null;
-    const active = Boolean(collection);
-    const isSelectedDistrict = collection && selectedCollection && collection.key === selectedCollection.key;
+    const districtCollections = byCode.get(district.adcode) || byName.get(district.name) || [];
+    const active = districtCollections.length > 0;
+    const isSelectedDistrict = Boolean(
+      selectedCollection && districtCollections.some((collection) => collection.key === selectedCollection.key)
+    );
     for (const path of district.boundaries) {
-      const isSelected = isSelectedDistrict;
       const polygon = new AMap.Polygon({
         path,
-        strokeColor: isSelected ? "#5b83c7" : active ? "#9cb9e3" : "rgba(176,162,137,0.42)",
-        strokeWeight: isSelected ? 3.2 : active ? 1.8 : 1.1,
-        fillColor: isSelected ? "#ebf3ff" : active ? "#f6faff" : "#faf7f1",
-        fillOpacity: isSelected ? 0.96 : active ? 0.78 : 0.18,
+        strokeColor: isSelectedDistrict ? "#5b83c7" : active ? "#9cb9e3" : "rgba(176,162,137,0.42)",
+        strokeWeight: isSelectedDistrict ? 3.2 : active ? 1.8 : 1.1,
+        fillColor: isSelectedDistrict ? "#ebf3ff" : active ? "#f6faff" : "#faf7f1",
+        fillOpacity: isSelectedDistrict ? 0.96 : active ? 0.78 : 0.18,
         bubble: true,
-        cursor: collection ? "pointer" : "default",
+        cursor: active ? "pointer" : "default",
       });
       polygon.setMap(map);
       mapStore.cityOverlays.push(polygon);
       allPolygons.push(polygon);
-      if (collection) {
+      if (active) {
         polygon.on("click", () => {
-          state.citySelection.activeCollectionKeyByCity[city.slug] = collection.key;
+          const nextCollection =
+            districtCollections.find((collection) => collection.key === selectedCollection?.key) ||
+            districtCollections[0];
+          state.citySelection.activeCollectionKeyByCity[city.slug] = nextCollection.key;
           state.citySelection.shouldFocusDistrictByCity[city.slug] = true;
           renderApp();
         });
       }
-      if (isSelected) {
+      if (isSelectedDistrict) {
         selectedPolygons.push(polygon);
       }
     }
@@ -1357,38 +1374,41 @@ async function initCityMap(city) {
     if (isSelectedDistrict && !selectedFocusPoint && district.center) {
       selectedFocusPoint = { ...district.center };
     }
+  }
 
-    if (collection?.photos?.length) {
-      for (const photo of collection.photos) {
-        if (!photo.longitude || !photo.latitude) {
-          continue;
-        }
-        const pointMarker = new AMap.Marker({
-          position: [photo.longitude, photo.latitude],
-          anchor: "center",
-          offset: new AMap.Pixel(0, 0),
-          zIndex: isSelectedDistrict ? 58 : 34,
-          content: createPhotoSpotContent(isSelectedDistrict),
-        });
-        pointMarker.on("click", () => {
-          state.citySelection.activeCollectionKeyByCity[city.slug] = collection.key;
-          state.citySelection.shouldFocusDistrictByCity[city.slug] = true;
-          renderApp();
-        });
-        pointMarker.setMap(map);
-        mapStore.cityOverlays.push(pointMarker);
-        if (isSelectedDistrict) {
-          selectedPhotoMarkers.push(pointMarker);
-        }
+  for (const collection of city.collections) {
+    const isSelectedCollection = Boolean(selectedCollection && selectedCollection.key === collection.key);
+
+    for (const photo of collection.photos) {
+      if (!photo.longitude || !photo.latitude) {
+        continue;
+      }
+      const pointMarker = new AMap.Marker({
+        position: [photo.longitude, photo.latitude],
+        anchor: "center",
+        offset: new AMap.Pixel(0, 0),
+        zIndex: isSelectedCollection ? 58 : 34,
+        content: createPhotoSpotContent(isSelectedCollection),
+      });
+      pointMarker.on("click", () => {
+        state.citySelection.activeCollectionKeyByCity[city.slug] = collection.key;
+        state.citySelection.shouldFocusDistrictByCity[city.slug] = true;
+        renderApp();
+      });
+      pointMarker.setMap(map);
+      mapStore.cityOverlays.push(pointMarker);
+      if (isSelectedCollection) {
+        selectedPhotoMarkers.push(pointMarker);
       }
     }
 
-    if (collection?.count && district.center) {
+    if (collection.center) {
       const marker = new AMap.Marker({
-        position: [district.center.lng, district.center.lat],
+        position: [collection.center.lng, collection.center.lat],
         anchor: "bottom-center",
         offset: new AMap.Pixel(0, -8),
-        content: createLocationPinContent(collection.label, collection.count, selectedCollection?.key === collection.key),
+        zIndex: isSelectedCollection ? 64 : 42,
+        content: createLocationPinContent(collection.label, collection.count, isSelectedCollection),
       });
       marker.on("click", () => {
         state.citySelection.activeCollectionKeyByCity[city.slug] = collection.key;

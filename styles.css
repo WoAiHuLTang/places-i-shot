@@ -610,16 +610,15 @@ img {
 
 .collection-rail {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(248px, 280px);
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
   gap: 16px;
-  overflow-x: auto;
-  padding: 2px 2px 6px;
-  scroll-snap-type: x proximity;
+  overflow: visible;
+  padding: 2px;
 }
 
 .collection-rail::-webkit-scrollbar {
-  height: 8px;
+  width: 0;
+  height: 0;
 }
 
 .collection-rail::-webkit-scrollbar-thumb {
@@ -628,7 +627,7 @@ img {
 }
 
 .collection-rail .collection-card {
-  scroll-snap-align: start;
+  min-width: 0;
 }
 
 .gallery-panel {
