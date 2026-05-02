@@ -2295,7 +2295,10 @@ function renderPhotoGrid(collection, city) {
             <button
               class="photo-card ${getPhotoCardClass(index)}"
               type="button"
-              data-photo-open="${city.slug}:${collection.key}:${photo.id}:${index}"
+              data-photo-open="1"
+              data-photo-city="${escapeHtml(city.slug)}"
+              data-photo-collection="${escapeHtml(collection.key)}"
+              data-photo-id="${escapeHtml(photo.id)}"
               style="background-image:url('${photo.imageUrl}')"
             >
               <span class="photo-card-topline">${escapeHtml(formatDate(photo.shotAt))}</span>
@@ -3694,6 +3697,48 @@ function renderMapPage() {
   `;
 }
 
+function renderPhotoGrid(collection, city) {
+  if (!collection) {
+    return `<div class="empty-card">先点开一个地点集合。</div>`;
+  }
+
+  return `
+    <div class="gallery-head">
+      <div>
+        <span class="eyebrow">Location</span>
+        <h2>${escapeHtml(collection.label)}</h2>
+      </div>
+      <div class="gallery-meta">
+        <span>${collection.count} 张</span>
+        ${collection.latestShotAt ? `<span>${escapeHtml(formatDate(collection.latestShotAt))}</span>` : ""}
+      </div>
+    </div>
+    <div class="photo-grid">
+      ${collection.photos
+        .map(
+          (photo, index) => `
+            <button
+              class="photo-card ${getPhotoCardClass(index)}"
+              type="button"
+              data-photo-open="1"
+              data-photo-city="${escapeHtml(city.slug)}"
+              data-photo-collection="${escapeHtml(collection.key)}"
+              data-photo-id="${escapeHtml(photo.id)}"
+              style="background-image:url('${photo.imageUrl}')"
+            >
+              <span class="photo-card-topline">${escapeHtml(formatDate(photo.shotAt))}</span>
+              <span class="photo-card-overlay">
+                <strong>${escapeHtml(photo.title)}</strong>
+                <span>${escapeHtml(photo.streetName || photo.location || collection.label)}</span>
+              </span>
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderAdminLibrarySection() {
   if (!state.auth.token) {
     return "";
@@ -3979,7 +4024,9 @@ function bindEvents() {
 
     const photoButton = target.closest("[data-photo-open]");
     if (photoButton) {
-      const [citySlug, collectionKey, photoId] = (photoButton.getAttribute("data-photo-open") || "").split(":");
+      const citySlug = photoButton.getAttribute("data-photo-city") || "";
+      const collectionKey = photoButton.getAttribute("data-photo-collection") || "";
+      const photoId = photoButton.getAttribute("data-photo-id") || "";
       const city = getCityBySlug(citySlug);
       const collection = city?.collections.find((item) => item.key === collectionKey);
       const photo = collection?.photos.find((item) => item.id === photoId);
