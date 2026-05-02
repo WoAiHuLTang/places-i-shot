@@ -367,6 +367,55 @@ app.post("/api/admin/photos", requireAdmin, upload.array("photos", 32), async (r
   }
 });
 
+app.patch("/api/admin/photos/:photoId/cover", requireAdmin, async (request, response, next) => {
+  const connection = await pool.getConnection();
+
+  try {
+    const photoId = String(request.params.photoId || "").trim();
+    if (!photoId) {
+      response.status(400).json({ error: "Photo id is required" });
+      return;
+    }
+
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query(
+      `
+        SELECT
+          id,
+          city_id AS cityId
+        FROM photos
+        WHERE id = ?
+        LIMIT 1
+      `,
+      [photoId]
+    );
+
+    const photo = rows[0];
+    if (!photo) {
+      await connection.rollback();
+      response.status(404).json({ error: "Photo not found" });
+      return;
+    }
+
+    await connection.query("UPDATE photos SET is_cover = 0 WHERE city_id = ?", [photo.cityId]);
+    await connection.query("UPDATE photos SET is_cover = 1 WHERE id = ?", [photoId]);
+
+    await connection.commit();
+
+    response.json({
+      ok: true,
+      cityId: Number(photo.cityId),
+      photoId,
+    });
+  } catch (error) {
+    await connection.rollback();
+    next(error);
+  } finally {
+    connection.release();
+  }
+});
+
 app.delete("/api/admin/photos/:photoId", requireAdmin, async (request, response, next) => {
   const connection = await pool.getConnection();
 

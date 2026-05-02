@@ -237,6 +237,7 @@ const state = {
     previews: [],
     libraryCitySlug: "",
     deletingPhotoId: "",
+    settingCoverPhotoId: "",
     status: "",
     statusKind: "neutral",
     published: true,
@@ -2840,6 +2841,7 @@ function renderAdminLibrarySection() {
               ${libraryCity.photos
                 .map((photo) => {
                   const deleting = state.admin.deletingPhotoId === photo.id;
+                  const settingCover = state.admin.settingCoverPhotoId === photo.id;
                   const locationLabel = collectionLabels.get(photo.id) || photo.location || photo.districtName || "未命名地点";
                   return `
                     <article class="admin-photo-card">
@@ -2852,14 +2854,24 @@ function renderAdminLibrarySection() {
                           <span>${escapeHtml(locationLabel)}</span>
                           <small>${escapeHtml(photo.shotAt || "未记录日期")}</small>
                         </div>
-                        <button
-                          class="danger-button"
-                          type="button"
-                          data-admin-delete-photo="${photo.id}"
-                          ${deleting ? "disabled" : ""}
-                        >
-                          ${deleting ? "删除中…" : "删除"}
-                        </button>
+                        <div class="admin-photo-actions">
+                          <button
+                            class="ghost-button admin-photo-action"
+                            type="button"
+                            data-admin-set-cover="${photo.id}"
+                            ${photo.isCover || settingCover ? "disabled" : ""}
+                          >
+                            ${photo.isCover ? "当前封面" : settingCover ? "设置中…" : "设为封面"}
+                          </button>
+                          <button
+                            class="danger-button admin-photo-action"
+                            type="button"
+                            data-admin-delete-photo="${photo.id}"
+                            ${deleting ? "disabled" : ""}
+                          >
+                            ${deleting ? "删除中…" : "删除"}
+                          </button>
+                        </div>
                       </div>
                     </article>
                   `;
@@ -3424,6 +3436,33 @@ async function handleAdminPhotoDelete(photoId) {
   }
 }
 
+async function handleAdminPhotoCover(photoId) {
+  if (!photoId) {
+    return;
+  }
+
+  state.admin.settingCoverPhotoId = photoId;
+  state.admin.statusKind = "progress";
+  state.admin.status = "正在设置封面…";
+  renderApp();
+
+  try {
+    await apiFetch(`/admin/photos/${encodeURIComponent(photoId)}/cover`, {
+      method: "PATCH",
+    });
+    await loadCities();
+    state.admin.settingCoverPhotoId = "";
+    state.admin.statusKind = "success";
+    state.admin.status = "已设为封面。";
+    renderApp();
+  } catch (error) {
+    state.admin.settingCoverPhotoId = "";
+    state.admin.statusKind = "error";
+    state.admin.status = error.message || "设置封面失败";
+    renderApp();
+  }
+}
+
 function resetAdminForm(cityId = null) {
   state.admin.cityId = cityId;
   state.admin.cityName = "";
@@ -3450,6 +3489,7 @@ function resetAdminForm(cityId = null) {
   state.admin.files = [];
   state.admin.previews = [];
   state.admin.deletingPhotoId = "";
+  state.admin.settingCoverPhotoId = "";
   state.admin.status = "";
   state.admin.statusKind = "neutral";
 }
@@ -3859,6 +3899,137 @@ function renderAdminLibrarySection() {
   `;
 }
 
+function renderAdminLibrarySection() {
+  if (!state.auth.token) {
+    return "";
+  }
+
+  if (state.ui.apiMode !== "live") {
+    return `
+      <section class="admin-library">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Library</span>
+            <h2>已上传照片</h2>
+          </div>
+        </div>
+        <div class="admin-library-empty">
+          <strong>当前是演示数据。</strong>
+          <span>只有连接到真实后端后，这里才会显示可管理、可删除、可设为封面的真实照片。</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const libraryCity = getAdminLibraryCity();
+  const manageableCities = state.cities.filter((city) => city.photoCount > 0 || city.slug === libraryCity?.slug);
+
+  if (!manageableCities.length) {
+    return `
+      <section class="admin-library">
+        <div class="section-head">
+          <div>
+            <span class="eyebrow">Library</span>
+            <h2>已上传照片</h2>
+          </div>
+        </div>
+        <div class="admin-library-empty">
+          <strong>还没有可管理的照片。</strong>
+          <span>先上传一组作品，之后就可以在这里删除照片或设为封面。</span>
+        </div>
+      </section>
+    `;
+  }
+
+  const collectionLabels = new Map();
+  if (libraryCity) {
+    for (const collection of libraryCity.collections) {
+      for (const photo of collection.photos) {
+        collectionLabels.set(photo.id, collection.label);
+      }
+    }
+  }
+
+  return `
+    <section class="admin-library">
+      <div class="section-head">
+        <div>
+          <span class="eyebrow">Library</span>
+          <h2>已上传照片</h2>
+        </div>
+      </div>
+      <div class="admin-city-rail">
+        ${manageableCities
+          .map(
+            (city) => `
+              <button
+                class="admin-city-chip ${libraryCity?.slug === city.slug ? "is-active" : ""}"
+                type="button"
+                data-admin-manage-city="${city.slug}"
+              >
+                <strong>${escapeHtml(city.name)}</strong>
+                <span>${city.photoCount} 张</span>
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+      ${
+        libraryCity?.photos.length
+          ? `
+            <div class="admin-photo-grid">
+              ${libraryCity.photos
+                .map((photo) => {
+                  const deleting = state.admin.deletingPhotoId === photo.id;
+                  const settingCover = state.admin.settingCoverPhotoId === photo.id;
+                  const locationLabel = collectionLabels.get(photo.id) || photo.location || photo.districtName || "未命名地点";
+                  return `
+                    <article class="admin-photo-card">
+                      <div class="admin-photo-cover" style="background-image:url('${photo.imageUrl}')">
+                        ${photo.isCover ? '<span class="admin-photo-badge">封面</span>' : ""}
+                      </div>
+                      <div class="admin-photo-body">
+                        <div class="admin-photo-meta">
+                          <strong>${escapeHtml(photo.title || locationLabel)}</strong>
+                          <span>${escapeHtml(locationLabel)}</span>
+                          <small>${escapeHtml(photo.shotAt || "未记录日期")}</small>
+                        </div>
+                        <div class="admin-photo-actions">
+                          <button
+                            class="ghost-button admin-photo-action"
+                            type="button"
+                            data-admin-set-cover="${photo.id}"
+                            ${photo.isCover || settingCover ? "disabled" : ""}
+                          >
+                            ${photo.isCover ? "当前封面" : settingCover ? "设置中…" : "设为封面"}
+                          </button>
+                          <button
+                            class="danger-button admin-photo-action"
+                            type="button"
+                            data-admin-delete-photo="${photo.id}"
+                            ${deleting ? "disabled" : ""}
+                          >
+                            ${deleting ? "删除中…" : "删除"}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  `;
+                })
+                .join("")}
+            </div>
+          `
+          : `
+            <div class="admin-library-empty">
+              <strong>${escapeHtml(libraryCity?.name || "当前城市")} 目前没有照片。</strong>
+              <span>删除完最后一张后，这座城市会从首页高亮列表里自动消失。</span>
+            </div>
+          `
+      }
+    </section>
+  `;
+}
+
 function renderAdminPage() {
   if (!state.auth.token) {
     return renderLoginPanel();
@@ -4068,6 +4239,13 @@ function bindEvents() {
         state.admin.libraryCitySlug = slug;
         renderApp();
       }
+      return;
+    }
+
+    const setCoverButton = target.closest("[data-admin-set-cover]");
+    if (setCoverButton) {
+      const photoId = setCoverButton.getAttribute("data-admin-set-cover") || "";
+      await handleAdminPhotoCover(photoId);
       return;
     }
 
